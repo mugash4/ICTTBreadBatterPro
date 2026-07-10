@@ -4568,6 +4568,135 @@ double StructureAgreementScore()
    return agreement*33.33;
 }
 
+//====================================================
+// STRUCTURE CACHE
+//====================================================
+
+struct StructureCache
+{
+   bool valid;
+
+   ENUM_DIRECTION direction;
+
+   ENUM_STRUCTURE structure;
+
+   ENUM_TIMEFRAMES timeframe;
+
+   double impulseHigh;
+   double impulseLow;
+
+   double swingHigh;
+   double swingLow;
+
+   int swingHighIndex;
+   int swingLowIndex;
+
+   datetime impulseStart;
+
+   datetime impulseEnd;
+
+   double impulseSize;
+
+   double impulseATR;
+
+   bool newStructure;
+};
+
+StructureCache StructureState;
+
+//----------------------------------------------------
+// Reset Structure Cache
+//----------------------------------------------------
+
+void ResetStructureCache()
+{
+   ZeroMemory(StructureState);
+
+   StructureState.valid=false;
+}
+
+//----------------------------------------------------
+// Save Confirmed Structure
+//----------------------------------------------------
+
+void SaveStructureCache(
+   ENUM_DIRECTION direction,
+   ENUM_STRUCTURE structure,
+   double swingHigh,
+   double swingLow,
+   int highIndex,
+   int lowIndex)
+{
+   ResetStructureCache();
+
+   StructureState.valid=true;
+
+   StructureState.direction=direction;
+
+   StructureState.structure=structure;
+
+   StructureState.timeframe=PERIOD_CURRENT;
+
+   StructureState.swingHigh=swingHigh;
+
+   StructureState.swingLow=swingLow;
+
+   StructureState.impulseHigh=swingHigh;
+
+   StructureState.impulseLow=swingLow;
+
+   StructureState.swingHighIndex=highIndex;
+
+   StructureState.swingLowIndex=lowIndex;
+
+   StructureState.impulseStart=
+      iTime(_Symbol,
+            PERIOD_CURRENT,
+            highIndex);
+
+   StructureState.impulseEnd=
+      iTime(_Symbol,
+            PERIOD_CURRENT,
+            lowIndex);
+
+   StructureState.impulseSize=
+      MathAbs(
+         swingHigh-
+         swingLow);
+
+   StructureState.impulseATR=
+      GetATR();
+
+   StructureState.newStructure=true;
+}
+
+
+double CurrentImpulseHigh()
+{
+   return StructureState.impulseHigh;
+}
+
+double CurrentImpulseLow()
+{
+   return StructureState.impulseLow;
+}
+
+double CurrentSwingHigh()
+{
+   return StructureState.swingHigh;
+}
+
+double CurrentSwingLow()
+{
+   return StructureState.swingLow;
+}
+
+
+bool StructureReady()
+{
+   return StructureState.valid;
+}
+
 
 //====================================================
 // SECTION 22 - LIQUIDITY ENGINE
@@ -5315,6 +5444,481 @@ void UpdateLiquidityEngine()
       GetBestLiquidityZone();
 }
 
+
+
+//====================================================
+// SECTION 23 - PREMIUM / DISCOUNT ENGINE
+//====================================================
+
+//----------------------------------------------------
+// Premium / Discount State
+//----------------------------------------------------
+
+enum ENUM_PD_STATE
+{
+   PD_UNKNOWN = 0,
+   PD_PREMIUM,
+   PD_EQUILIBRIUM,
+   PD_DISCOUNT
+};
+
+//----------------------------------------------------
+// Premium Discount Profile
+//----------------------------------------------------
+
+struct PremiumDiscountProfile
+{
+   bool valid;
+
+   ENUM_TIMEFRAMES timeframe;
+
+   ENUM_PD_STATE state;
+
+   double dealingHigh;
+   double dealingLow;
+
+   double equilibrium;
+
+   double premiumStart;
+   double discountEnd;
+
+   double fib50;
+   double fib618;
+   double fib705;
+   double fib79;
+
+   double oteHigh;
+   double oteLow;
+
+   double currentPrice;
+
+   double confidence;
+
+   datetime lastUpdate;
+};
+
+PremiumDiscountProfile PDProfile;
+
+//----------------------------------------------------
+// Inputs
+//----------------------------------------------------
+
+input bool EnablePremiumDiscount = true;
+
+input bool EnableOTEFilter = true;
+
+input double MinimumPDConfidence = 70.0;
+
+//----------------------------------------------------
+// Reset
+//----------------------------------------------------
+
+void ResetPremiumDiscount()
+{
+   ZeroMemory(PDProfile);
+
+   PDProfile.valid=false;
+   PDProfile.state=PD_UNKNOWN;
+}
+
+
+//----------------------------------------------------
+// Highest Swing
+//----------------------------------------------------
+
+double GetDealingRangeHigh()
+{
+   double highest=iHigh(
+      _Symbol,
+      PERIOD_CURRENT,
+      iHighest(
+         _Symbol,
+         PERIOD_CURRENT,
+         MODE_HIGH,
+         100,
+         1));
+
+   return highest;
+}
+
+//----------------------------------------------------
+// Lowest Swing
+//----------------------------------------------------
+
+double GetDealingRangeLow()
+{
+   double lowest=iLow(
+      _Symbol,
+      PERIOD_CURRENT,
+      iLowest(
+         _Symbol,
+         PERIOD_CURRENT,
+         MODE_LOW,
+         100,
+         1));
+
+   return lowest;
+}
+
+
+//----------------------------------------------------
+// Structure Based Dealing Range
+//----------------------------------------------------
+
+bool BuildStructureDealingRange()
+{
+   PDProfile.valid=false;
+
+   // Require confirmed structure
+   if(CurrentDirection==DIRECTION_NONE)
+      return false;
+
+   double highest=-DBL_MAX;
+   double lowest= DBL_MAX;
+
+   bool found=false;
+
+   //------------------------------------------------
+   // Search recent confirmed swings
+   //------------------------------------------------
+
+   int bars=MathMin(Bars(_Symbol,PERIOD_CURRENT),
+                    LiquidityLookbackBars);
+
+   for(int i=2;i<bars;i++)
+   {
+      double high=iHigh(_Symbol,PERIOD_CURRENT,i);
+      double low =iLow(_Symbol,PERIOD_CURRENT,i);
+
+      if(high>highest)
+         highest=high;
+
+      if(low<lowest)
+         lowest=low;
+
+      found=true;
+   }
+
+   if(!found)
+      return false;
+
+   if(highest<=lowest)
+      return false;
+
+   PDProfile.dealingHigh=highest;
+   PDProfile.dealingLow =lowest;
+
+   double range=
+      highest-lowest;
+
+   PDProfile.equilibrium=
+      lowest+(range*0.50);
+
+   //------------------------------------------------
+   // Bullish Fib Levels
+   //------------------------------------------------
+
+   PDProfile.fib50=
+      lowest+(range*0.50);
+
+   PDProfile.fib618=
+      lowest+(range*0.618);
+
+   PDProfile.fib705=
+      lowest+(range*0.705);
+
+   PDProfile.fib79=
+      lowest+(range*0.79);
+
+   //------------------------------------------------
+   // OTE Zone
+   //------------------------------------------------
+
+   PDProfile.oteLow=
+      PDProfile.fib618;
+
+   PDProfile.oteHigh=
+      PDProfile.fib79;
+
+   PDProfile.discountEnd=
+      PDProfile.fib50;
+
+   PDProfile.premiumStart=
+      PDProfile.fib50;
+
+   PDProfile.currentPrice=
+      SymbolInfoDouble(_Symbol,SYMBOL_BID);
+
+   PDProfile.timeframe=
+      PERIOD_CURRENT;
+
+   PDProfile.lastUpdate=
+      TimeCurrent();
+
+   PDProfile.valid=true;
+
+   return true;
+}
+
+
+
+//----------------------------------------------------
+// Determine Premium / Discount
+//----------------------------------------------------
+
+void CalculatePremiumDiscountState()
+{
+   if(PDProfile.currentPrice>
+      PDProfile.equilibrium)
+   {
+      PDProfile.state=
+         PD_PREMIUM;
+   }
+   else
+   if(PDProfile.currentPrice<
+      PDProfile.equilibrium)
+   {
+      PDProfile.state=
+         PD_DISCOUNT;
+   }
+   else
+   {
+      PDProfile.state=
+         PD_EQUILIBRIUM;
+   }
+
+   PDProfile.valid=true;
+
+   PDProfile.lastUpdate=
+      TimeCurrent();
+}
+
+//----------------------------------------------------
+// Is Premium
+//----------------------------------------------------
+
+bool IsPremium()
+{
+   return
+      PDProfile.state==
+      PD_PREMIUM;
+}
+
+//----------------------------------------------------
+// Is Discount
+//----------------------------------------------------
+
+bool IsDiscount()
+{
+   return
+      PDProfile.state==
+      PD_DISCOUNT;
+}
+
+//----------------------------------------------------
+// Is Equilibrium
+//----------------------------------------------------
+
+bool IsEquilibrium()
+{
+   return
+      PDProfile.state==
+      PD_EQUILIBRIUM;
+}
+
+//----------------------------------------------------
+// Bullish OTE
+//----------------------------------------------------
+
+bool InBullishOTE()
+{
+   if(!PDProfile.valid)
+      return false;
+
+   double price=
+      SymbolInfoDouble(
+         _Symbol,
+         SYMBOL_BID);
+
+   return(
+      price>=PDProfile.oteLow &&
+      price<=PDProfile.oteHigh
+   );
+}
+
+//----------------------------------------------------
+// Bearish OTE
+//----------------------------------------------------
+
+bool InBearishOTE()
+{
+   if(!PDProfile.valid)
+      return false;
+
+   double price=
+      SymbolInfoDouble(
+         _Symbol,
+         SYMBOL_BID);
+
+   double upper=
+      PDProfile.dealingHigh-
+      (PDProfile.dealingHigh-
+      PDProfile.dealingLow)*0.618;
+
+   double lower=
+      PDProfile.dealingHigh-
+      (PDProfile.dealingHigh-
+      PDProfile.dealingLow)*0.79;
+
+   return(
+      price<=upper &&
+      price>=lower
+   );
+}
+
+//----------------------------------------------------
+// Liquidity Confidence
+//----------------------------------------------------
+
+double LiquidityConfidence()
+{
+   if(!HasValidLiquidity())
+      return 0;
+
+   return HighestLiquidityScore();
+}
+
+//----------------------------------------------------
+// Structure Confidence
+//----------------------------------------------------
+
+double StructureConfidence()
+{
+   return StructureAgreementScore();
+}
+
+//----------------------------------------------------
+// OTE Confidence
+//----------------------------------------------------
+
+double OTEConfidence()
+{
+   double score=0;
+
+   if(InBullishOTE())
+      score=100;
+
+   if(InBearishOTE())
+      score=100;
+
+   return score;
+}
+
+//----------------------------------------------------
+// Premium Discount Confidence
+//----------------------------------------------------
+
+void CalculatePDConfidence()
+{
+   double score=0;
+
+   score+=LiquidityConfidence()*0.35;
+
+   score+=StructureConfidence()*0.40;
+
+   score+=OTEConfidence()*0.25;
+
+   PDProfile.confidence=
+      MathMin(score,100.0);
+}
+
+//----------------------------------------------------
+// Premium Discount Valid
+//----------------------------------------------------
+
+bool PremiumDiscountValid()
+{
+   if(!PDProfile.valid)
+      return false;
+
+   if(PDProfile.confidence<
+      MinimumPDConfidence)
+      return false;
+
+   return true;
+}
+
+//----------------------------------------------------
+// Update Premium Discount Engine
+//----------------------------------------------------
+
+void UpdatePremiumDiscountEngine()
+{
+   if(!EnablePremiumDiscount)
+      return;
+
+   ResetPremiumDiscount();
+
+   if(!BuildStructureDealingRange())
+      return;
+
+   CalculatePremiumDiscountState();
+
+   CalculatePDConfidence();
+}
+
+//----------------------------------------------------
+// Bullish Premium Discount Filter
+//----------------------------------------------------
+
+bool BullishPDFilter()
+{
+   if(!PremiumDiscountValid())
+      return false;
+
+   if(!IsDiscount())
+      return false;
+
+   if(EnableOTEFilter &&
+      !InBullishOTE())
+      return false;
+
+   return true;
+}
+
+//----------------------------------------------------
+// Bearish Premium Discount Filter
+//----------------------------------------------------
+
+bool BearishPDFilter()
+{
+   if(!PremiumDiscountValid())
+      return false;
+
+   if(!IsPremium())
+      return false;
+
+   if(EnableOTEFilter &&
+      !InBearishOTE())
+      return false;
+
+   return true;
+}
+
+//----------------------------------------------------
+// Premium Discount Direction
+//----------------------------------------------------
+
+ENUM_DIRECTION PremiumDiscountDirection()
+{
+   if(BullishPDFilter())
+      return DIRECTION_BULLISH;
+
+   if(BearishPDFilter())
+      return DIRECTION_BEARISH;
+
+   return DIRECTION_NONE;
+}
 
 
 
