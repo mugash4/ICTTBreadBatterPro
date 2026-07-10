@@ -3529,15 +3529,69 @@ bool BearishFVG(
 }
 
 //----------------------------------------------------
+// Calculate FVG Score
+//----------------------------------------------------
+
+double CalculateFVGScore(
+   ENUM_TIMEFRAMES tf,
+   double high,
+   double low,
+   int bar)
+{
+   double score=0.0;
+
+   //------------------------------------------
+   // Size Score (40)
+   //------------------------------------------
+
+   double atr=GetATR(tf);
+
+   if(atr>0)
+   {
+      double ratio=
+         MathAbs(high-low)/atr;
+
+      score+=MathMin(ratio*40.0,40.0);
+   }
+
+   //------------------------------------------
+   // Freshness (20)
+   //------------------------------------------
+
+   score+=MathMax(
+      20.0-(bar*3.0),
+      0.0);
+
+   //------------------------------------------
+   // Close Strength (20)
+   //------------------------------------------
+
+   score+=
+      CandleClosePercent(tf,bar)
+      *0.20;
+
+   //------------------------------------------
+   // Body Strength (20)
+   //------------------------------------------
+
+   score+=
+      CandleBodyPercent(tf,bar)
+      *0.20;
+
+   return
+      MathMin(score,100.0);
+}
+
+//----------------------------------------------------
 // Detect FVG From Displacement
 //----------------------------------------------------
 
 bool DetectDisplacementFVG(
    ENUM_TIMEFRAMES tf)
 {
-   int idx=StructureIndex(tf);
+   int idx = StructureIndex(tf);
 
-   if(idx<0)
+   if(idx < 0)
       return false;
 
    ResetFVG(tf);
@@ -3549,84 +3603,124 @@ bool DetectDisplacementFVG(
    if(!DisplacementConfirmed(tf))
       return false;
 
-   double high,low;
+   double high, low;
+
+   double bestScore = -1.0;
+
+   double bestHigh = 0.0;
+   double bestLow  = 0.0;
+
+   int bestBar = -1;
+
+   ENUM_FVG_TYPE bestType = FVG_NONE;
 
    //------------------------------------------
    // Search around displacement candle
    //------------------------------------------
 
-   for(int bar=1; bar<=5; bar++)
+   for(int bar = 1; bar <= 5; bar++)
    {
       //--------------------------------------
-      // Bullish
+      // Bullish FVG
       //--------------------------------------
 
-      if(StructureDirection(tf)==DIRECTION_BULLISH)
+      if(StructureDirection(tf) == DIRECTION_BULLISH)
       {
-         if(BullishFVG(tf,bar,high,low))
+         if(BullishFVG(tf, bar, high, low))
          {
-            FVGData[idx].valid=true;
-            FVGData[idx].confirmed=true;
+            double score =
+               CalculateFVGScore(
+                  tf,
+                  high,
+                  low,
+                  bar);
 
-            FVGData[idx].type=FVG_BULLISH;
-            FVGData[idx].direction=DIRECTION_BULLISH;
+            if(score > bestScore)
+            {
+               bestScore = score;
 
-            FVGData[idx].high=high;
-            FVGData[idx].low=low;
+               bestHigh = high;
+               bestLow  = low;
 
-            FVGData[idx].midpoint=
-               (high+low)/2.0;
+               bestBar = bar;
 
-            FVGData[idx].size=
-               MathAbs(high-low);
-
-            FVGData[idx].creationBar=bar;
-
-            FVGData[idx].displacementBar=1;
-
-            FVGData[idx].creationTime=
-               iTime(_Symbol,tf,bar);
-
-            return true;
+               bestType = FVG_BULLISH;
+            }
          }
       }
 
       //--------------------------------------
-      // Bearish
+      // Bearish FVG
       //--------------------------------------
 
-      if(StructureDirection(tf)==DIRECTION_BEARISH)
+      if(StructureDirection(tf) == DIRECTION_BEARISH)
       {
-         if(BearishFVG(tf,bar,high,low))
+         if(BearishFVG(tf, bar, high, low))
          {
-            FVGData[idx].valid=true;
-            FVGData[idx].confirmed=true;
+            double score =
+               CalculateFVGScore(
+                  tf,
+                  high,
+                  low,
+                  bar);
 
-            FVGData[idx].type=FVG_BEARISH;
-            FVGData[idx].direction=DIRECTION_BEARISH;
+            if(score > bestScore)
+            {
+               bestScore = score;
 
-            FVGData[idx].high=high;
-            FVGData[idx].low=low;
+               bestHigh = high;
+               bestLow  = low;
 
-            FVGData[idx].midpoint=
-               (high+low)/2.0;
+               bestBar = bar;
 
-            FVGData[idx].size=
-               MathAbs(high-low);
-
-            FVGData[idx].creationBar=bar;
-
-            FVGData[idx].displacementBar=1;
-
-            FVGData[idx].creationTime=
-               iTime(_Symbol,tf,bar);
-
-            return true;
+               bestType = FVG_BEARISH;
+            }
          }
       }
    }
 
-   return false;
+   //------------------------------------------
+   // No valid FVG found
+   //------------------------------------------
+
+   if(bestType == FVG_NONE)
+      return false;
+
+   //------------------------------------------
+   // Save Best FVG
+   //------------------------------------------
+
+   FVGData[idx].valid = true;
+
+   FVGData[idx].confirmed = true;
+
+   FVGData[idx].type = bestType;
+
+   FVGData[idx].direction =
+      StructureDirection(tf);
+
+   FVGData[idx].high = bestHigh;
+
+   FVGData[idx].low = bestLow;
+
+   FVGData[idx].midpoint =
+      (bestHigh + bestLow) / 2.0;
+
+   FVGData[idx].size =
+      MathAbs(bestHigh - bestLow);
+
+   FVGData[idx].creationBar =
+      bestBar;
+
+   FVGData[idx].displacementBar = 1;
+
+   FVGData[idx].creationTime =
+      iTime(_Symbol, tf, bestBar);
+
+   FVGData[idx].score =
+      bestScore;
+
+   return true;
 }
 
 //----------------------------------------------------
