@@ -2142,6 +2142,1385 @@ bool LowerHigh()
       PreviousSwingHigh.price;
 }
 
+//----------------------------------------------------
+// Swing History Storage
+//----------------------------------------------------
+
+#define MAX_SWINGS 20
+
+SwingPoint SwingHighs[MAX_SWINGS];
+
+SwingPoint SwingLows[MAX_SWINGS];
+
+int SwingHighCount=0;
+
+int SwingLowCount=0;
+
+//----------------------------------------------------
+
+void ResetSwingHistory()
+{
+   SwingHighCount=0;
+
+   SwingLowCount=0;
+
+   ArrayInitialize(SwingHighs,0);
+
+   ArrayInitialize(SwingLows,0);
+}
+
+//----------------------------------------------------
+
+void AddSwingHigh(SwingPoint swing)
+{
+   if(!swing.valid)
+      return;
+
+   if(SwingHighCount<MAX_SWINGS)
+   {
+      SwingHighs[SwingHighCount]=swing;
+
+      SwingHighCount++;
+
+      return;
+   }
+
+   for(int i=0;i<MAX_SWINGS-1;i++)
+      SwingHighs[i]=SwingHighs[i+1];
+
+   SwingHighs[MAX_SWINGS-1]=swing;
+}
+
+//----------------------------------------------------
+
+void AddSwingLow(SwingPoint swing)
+{
+   if(!swing.valid)
+      return;
+
+   if(SwingLowCount<MAX_SWINGS)
+   {
+      SwingLows[SwingLowCount]=swing;
+
+      SwingLowCount++;
+
+      return;
+   }
+
+   for(int i=0;i<MAX_SWINGS-1;i++)
+      SwingLows[i]=SwingLows[i+1];
+
+   SwingLows[MAX_SWINGS-1]=swing;
+}
+
+
+//----------------------------------------------------
+
+void RefreshSwingHistory()
+{
+   SwingPoint swing;
+
+   if(FindLatestSwingHigh(PERIOD_CURRENT,swing))
+   {
+      if(SwingHighCount==0 ||
+         SwingHighs[SwingHighCount-1].time!=swing.time)
+      {
+         AddSwingHigh(swing);
+      }
+   }
+
+   if(FindLatestSwingLow(PERIOD_CURRENT,swing))
+   {
+      if(SwingLowCount==0 ||
+         SwingLows[SwingLowCount-1].time!=swing.time)
+      {
+         AddSwingLow(swing);
+      }
+   }
+}
+
+//----------------------------------------------------
+
+SwingPoint GetSwingHigh(int index)
+{
+   SwingPoint empty;
+
+   ZeroMemory(empty);
+
+   if(index<0 || index>=SwingHighCount)
+      return empty;
+
+   return SwingHighs[SwingHighCount-1-index];
+}
+
+//----------------------------------------------------
+
+SwingPoint GetSwingLow(int index)
+{
+   SwingPoint empty;
+
+   ZeroMemory(empty);
+
+   if(index<0 || index>=SwingLowCount)
+      return empty;
+
+   return SwingLows[SwingLowCount-1-index];
+}
+
+//----------------------------------------------------
+
+void UpdateSwingEngine()
+{
+   RefreshSwingHistory();
+
+   if(SwingHighCount>=2)
+   {
+      LatestSwingHigh=
+         GetSwingHigh(0);
+
+      PreviousSwingHigh=
+         GetSwingHigh(1);
+   }
+
+   if(SwingLowCount>=2)
+   {
+      LatestSwingLow=
+         GetSwingLow(0);
+
+      PreviousSwingLow=
+         GetSwingLow(1);
+   }
+
+   LatestSwingHigh.strong=
+      IsStrongSwingHigh(
+         LatestSwingHigh
+      );
+
+   LatestSwingLow.strong=
+      IsStrongSwingLow(
+         LatestSwingLow
+      );
+}
+
+
+//====================================================
+// SECTION 13 - MARKET STRUCTURE ENGINE
+//====================================================
+
+enum ENUM_STRUCTURE
+{
+   STRUCTURE_UNKNOWN = 0,
+
+   STRUCTURE_BULLISH,
+
+   STRUCTURE_BEARISH
+};
+
+enum ENUM_STRUCTURE_EVENT
+{
+   EVENT_NONE = 0,
+
+   EVENT_BOS,
+
+   EVENT_CHOCH,
+
+   EVENT_MSS
+};
+
+//----------------------------------------------------
+
+ENUM_STRUCTURE CurrentStructure =
+   STRUCTURE_UNKNOWN;
+
+ENUM_STRUCTURE_EVENT LastStructureEvent =
+   EVENT_NONE;
+
+//----------------------------------------------------
+
+bool BullishBreakOfStructure()
+{
+   if(SwingHighCount < 2)
+      return false;
+
+   double currentPrice =
+      SymbolInfoDouble(
+         _Symbol,
+         SYMBOL_BID
+      );
+
+   return
+      currentPrice >
+      LatestSwingHigh.price;
+}
+
+//----------------------------------------------------
+
+bool BearishBreakOfStructure()
+{
+   if(SwingLowCount < 2)
+      return false;
+
+   double currentPrice =
+      SymbolInfoDouble(
+         _Symbol,
+         SYMBOL_BID
+      );
+
+   return
+      currentPrice <
+      LatestSwingLow.price;
+}
+
+
+//----------------------------------------------------
+
+bool BullishCHOCH()
+{
+   if(CurrentStructure !=
+      STRUCTURE_BEARISH)
+      return false;
+
+   return
+      BullishBreakOfStructure();
+}
+
+//----------------------------------------------------
+
+bool BearishCHOCH()
+{
+   if(CurrentStructure !=
+      STRUCTURE_BULLISH)
+      return false;
+
+   return
+      BearishBreakOfStructure();
+}
+
+//----------------------------------------------------
+
+bool BullishMSS()
+{
+   if(!HigherHigh())
+      return false;
+
+   if(!HigherLow())
+      return false;
+
+   return
+      BullishBreakOfStructure();
+}
+
+//----------------------------------------------------
+
+bool BearishMSS()
+{
+   if(!LowerLow())
+      return false;
+
+   if(!LowerHigh())
+      return false;
+
+   return
+      BearishBreakOfStructure();
+}
+
+//----------------------------------------------------
+
+void UpdateMarketStructure()
+{
+   LastStructureEvent =
+      EVENT_NONE;
+
+   if(BullishMSS() &&
+      ConfirmedBullishBOS())
+   {
+      CurrentStructure =
+         STRUCTURE_BULLISH;
+
+      LastStructureEvent =
+         EVENT_MSS;
+
+      return;
+   }
+
+   if(BearishMSS() &&
+      ConfirmedBearishBOS())
+   {
+      CurrentStructure =
+         STRUCTURE_BEARISH;
+
+      LastStructureEvent =
+         EVENT_MSS;
+
+      return;
+   }
+
+   if(BullishCHOCH() &&
+      ConfirmedBullishBOS())
+   {
+      CurrentStructure =
+         STRUCTURE_BULLISH;
+
+      LastStructureEvent =
+         EVENT_CHOCH;
+
+      return;
+   }
+
+   if(BearishCHOCH() &&
+      ConfirmedBearishBOS())
+   {
+      CurrentStructure =
+         STRUCTURE_BEARISH;
+
+      LastStructureEvent =
+         EVENT_CHOCH;
+
+      return;
+   }
+
+   if(ConfirmedBullishBOS())
+   {
+      CurrentStructure =
+         STRUCTURE_BULLISH;
+
+      LastStructureEvent =
+         EVENT_BOS;
+
+      return;
+   }
+
+   if(ConfirmedBearishBOS())
+   {
+      CurrentStructure =
+         STRUCTURE_BEARISH;
+
+      LastStructureEvent =
+         EVENT_BOS;
+
+      return;
+   }
+}
+
+//----------------------------------------------------
+
+bool BullishStructure()
+{
+   return
+      CurrentStructure ==
+      STRUCTURE_BULLISH;
+}
+
+//----------------------------------------------------
+
+bool BearishStructure()
+{
+   return
+      CurrentStructure ==
+      STRUCTURE_BEARISH;
+}
+
+//----------------------------------------------------
+
+bool StructureBullishBias()
+{
+   return
+      BullishBias() &&
+      BullishStructure();
+}
+
+//----------------------------------------------------
+
+bool StructureBearishBias()
+{
+   return
+      BearishBias() &&
+      BearishStructure();
+}
+
+//----------------------------------------------------
+
+string StructureText()
+{
+   switch(CurrentStructure)
+   {
+      case STRUCTURE_BULLISH:
+
+         return "BULLISH";
+
+      case STRUCTURE_BEARISH:
+
+         return "BEARISH";
+
+      default:
+
+         return "UNKNOWN";
+   }
+}
+
+//----------------------------------------------------
+
+string StructureEventText()
+{
+   switch(LastStructureEvent)
+   {
+      case EVENT_BOS:
+
+         return "BOS";
+
+      case EVENT_CHOCH:
+
+         return "CHoCH";
+
+      case EVENT_MSS:
+
+         return "MSS";
+
+      default:
+
+         return "-";
+   }
+}
+
+
+
+//====================================================
+// SECTION 14 - CONFIRMED STRUCTURE BREAK ENGINE
+//====================================================
+
+input bool EnableConfirmedBreaks = true;
+
+input double BreakCloseATR = 0.20;
+
+input double MinimumDisplacementATR = 1.20;
+
+input bool RequireMomentumConfirmation = true;
+
+input bool RequireBodyBreak = true;
+
+//----------------------------------------------------
+
+double CandleBodySize(int shift)
+{
+   return MathAbs(
+      iClose(_Symbol,PERIOD_CURRENT,shift) -
+      iOpen(_Symbol,PERIOD_CURRENT,shift)
+   );
+}
+
+//----------------------------------------------------
+
+double CandleRange(int shift)
+{
+   return
+      iHigh(_Symbol,PERIOD_CURRENT,shift) -
+      iLow(_Symbol,PERIOD_CURRENT,shift);
+}
+
+//----------------------------------------------------
+
+bool StrongBullishDisplacement()
+{
+   double atr = GetATR();
+
+   if(atr<=0)
+      return false;
+
+   if(!IsBullishCandle(1))
+      return false;
+
+   return
+      CandleBodySize(1) >=
+      atr * MinimumDisplacementATR;
+}
+
+//----------------------------------------------------
+
+bool StrongBearishDisplacement()
+{
+   double atr = GetATR();
+
+   if(atr<=0)
+      return false;
+
+   if(!IsBearishCandle(1))
+      return false;
+
+   return
+      CandleBodySize(1) >=
+      atr * MinimumDisplacementATR;
+}
+
+//----------------------------------------------------
+
+bool BullishBreakConfirmed()
+{
+   if(!EnableConfirmedBreaks)
+      return BullishBreakOfStructure();
+
+   if(SwingHighCount<2)
+      return false;
+
+   double atr = GetATR();
+
+   double close =
+      iClose(_Symbol,PERIOD_CURRENT,1);
+
+   if(close <
+      LatestSwingHigh.price +
+      atr*BreakCloseATR)
+      return false;
+
+   if(RequireBodyBreak)
+   {
+      double open =
+         iOpen(_Symbol,PERIOD_CURRENT,1);
+
+      if(open >
+         LatestSwingHigh.price)
+         return false;
+   }
+
+   if(RequireMomentumConfirmation)
+   {
+      if(!StrongBullishDisplacement())
+         return false;
+   }
+
+   return true;
+}
+
+//----------------------------------------------------
+
+bool BearishBreakConfirmed()
+{
+   if(!EnableConfirmedBreaks)
+      return BearishBreakOfStructure();
+
+   if(SwingLowCount<2)
+      return false;
+
+   double atr = GetATR();
+
+   double close =
+      iClose(_Symbol,PERIOD_CURRENT,1);
+
+   if(close >
+      LatestSwingLow.price -
+      atr*BreakCloseATR)
+      return false;
+
+   if(RequireBodyBreak)
+   {
+      double open =
+         iOpen(_Symbol,PERIOD_CURRENT,1);
+
+      if(open <
+         LatestSwingLow.price)
+         return false;
+   }
+
+   if(RequireMomentumConfirmation)
+   {
+      if(!StrongBearishDisplacement())
+         return false;
+   }
+
+   return true;
+}
+
+//----------------------------------------------------
+
+bool ConfirmedBullishBOS()
+{
+   return
+      BullishBreakConfirmed();
+}
+
+//----------------------------------------------------
+
+bool ConfirmedBearishBOS()
+{
+   return
+      BearishBreakConfirmed();
+}
+
+
+//====================================================
+// SECTION 15 - INSTITUTIONAL DISPLACEMENT ENGINE
+//====================================================
+
+input bool EnableDisplacementFilter = true;
+
+input int MinimumDisplacementScore = 75;
+
+input bool EnableAdaptiveDisplacement = true;
+
+//----------------------------------------------------
+
+double CurrentDisplacementScore = 0.0;
+
+//----------------------------------------------------
+
+double BodyPercent(int shift)
+{
+   double range =
+      CandleRange(shift);
+
+   if(range<=0)
+      return 0;
+
+   return
+      (CandleBodySize(shift)/range)*100.0;
+}
+
+//----------------------------------------------------
+
+double UpperWick(int shift)
+{
+   return
+      iHigh(_Symbol,PERIOD_CURRENT,shift)-
+      MathMax(
+         iOpen(_Symbol,PERIOD_CURRENT,shift),
+         iClose(_Symbol,PERIOD_CURRENT,shift)
+      );
+}
+
+//----------------------------------------------------
+
+double LowerWick(int shift)
+{
+   return
+      MathMin(
+         iOpen(_Symbol,PERIOD_CURRENT,shift),
+         iClose(_Symbol,PERIOD_CURRENT,shift)
+      )-
+      iLow(_Symbol,PERIOD_CURRENT,shift);
+}
+
+//----------------------------------------------------
+
+double BodyStrengthScore()
+{
+   double percent =
+      BodyPercent(1);
+
+   if(percent>=90)
+      return 25;
+
+   if(percent>=80)
+      return 22;
+
+   if(percent>=70)
+      return 18;
+
+   if(percent>=60)
+      return 12;
+
+   return 0;
+}
+
+//----------------------------------------------------
+
+double ATRExpansionScore()
+{
+   double atr=
+      GetATR();
+
+   if(atr<=0)
+      return 0;
+
+   double body=
+      CandleBodySize(1);
+
+   double ratio=
+      body/atr;
+
+   if(ratio>=2.5)
+      return 25;
+
+   if(ratio>=2.0)
+      return 20;
+
+   if(ratio>=1.5)
+      return 15;
+
+   if(ratio>=1.2)
+      return 10;
+
+   return 0;
+}
+
+//----------------------------------------------------
+
+double ClosingStrengthScore()
+{
+   double range=
+      CandleRange(1);
+
+   if(range<=0)
+      return 0;
+
+   double close=
+      iClose(_Symbol,PERIOD_CURRENT,1);
+
+   double high=
+      iHigh(_Symbol,PERIOD_CURRENT,1);
+
+   double low=
+      iLow(_Symbol,PERIOD_CURRENT,1);
+
+   if(IsBullishCandle(1))
+   {
+      double position=
+         (close-low)/range;
+
+      if(position>=0.90)
+         return 20;
+
+      if(position>=0.80)
+         return 15;
+
+      if(position>=0.70)
+         return 10;
+   }
+
+   if(IsBearishCandle(1))
+   {
+      double position=
+         (high-close)/range;
+
+      if(position>=0.90)
+         return 20;
+
+      if(position>=0.80)
+         return 15;
+
+      if(position>=0.70)
+         return 10;
+   }
+
+   return 0;
+}
+
+//----------------------------------------------------
+
+double WickQualityScore()
+{
+   double body=
+      CandleBodySize(1);
+
+   if(body<=0)
+      return 0;
+
+   double upper=
+      UpperWick(1);
+
+   double lower=
+      LowerWick(1);
+
+   double ratio=
+      MathMax(upper,lower)/body;
+
+   if(ratio<=0.10)
+      return 15;
+
+   if(ratio<=0.20)
+      return 10;
+
+   if(ratio<=0.30)
+      return 5;
+
+   return 0;
+}
+
+
+//----------------------------------------------------
+
+double VolumeStrengthScore()
+{
+   long current=
+      iVolume(_Symbol,PERIOD_CURRENT,1);
+
+   double average=0;
+
+   for(int i=2;i<=21;i++)
+      average+=iVolume(
+         _Symbol,
+         PERIOD_CURRENT,
+         i);
+
+   average/=20.0;
+
+   if(average<=0)
+      return 0;
+
+   double ratio=
+      current/average;
+
+   if(ratio>=2.0)
+      return 15;
+
+   if(ratio>=1.6)
+      return 10;
+
+   if(ratio>=1.3)
+      return 5;
+
+   return 0;
+}
+
+//----------------------------------------------------
+
+double CalculateDisplacementScore()
+{
+   double score=0;
+
+   score+=BodyStrengthScore();
+
+   score+=ATRExpansionScore();
+
+   score+=ClosingStrengthScore();
+
+   score+=WickQualityScore();
+
+   score+=VolumeStrengthScore();
+
+   return
+      MathMin(score,100.0);
+}
+
+//----------------------------------------------------
+
+void UpdateDisplacementEngine()
+{
+   CurrentDisplacementScore=
+      CalculateDisplacementScore();
+}
+
+//----------------------------------------------------
+
+bool InstitutionalBullishDisplacement()
+{
+   if(!IsBullishCandle(1))
+      return false;
+
+   return
+      CurrentDisplacementScore>=
+      MinimumDisplacementScore;
+}
+
+//----------------------------------------------------
+
+bool InstitutionalBearishDisplacement()
+{
+   if(!IsBearishCandle(1))
+      return false;
+
+   return
+      CurrentDisplacementScore>=
+      MinimumDisplacementScore;
+}
+
+
+//====================================================
+// SECTION 16 - INSTITUTIONAL FAIR VALUE GAP ENGINE
+//====================================================
+
+enum ENUM_FVG_DIRECTION
+{
+   FVG_NONE = 0,
+
+   FVG_BULLISH,
+
+   FVG_BEARISH
+};
+
+struct FairValueGap
+{
+   bool valid;
+
+   ENUM_FVG_DIRECTION direction;
+
+   double upperPrice;
+
+   double lowerPrice;
+
+   double midpoint;
+
+   double size;
+
+   datetime created;
+
+   bool mitigated;
+
+   int touches;
+
+   double score;
+};
+
+FairValueGap CurrentFVG;
+
+//----------------------------------------------------
+
+input bool EnableFVGFilter = true;
+
+input int MinimumFVGScore = 70;
+
+//----------------------------------------------------
+
+void ResetFVG()
+{
+   ZeroMemory(CurrentFVG);
+
+   CurrentFVG.direction = FVG_NONE;
+}
+
+//----------------------------------------------------
+
+bool DetectBullishFVG()
+{
+   ResetFVG();
+
+   double high1 =
+      iHigh(_Symbol,PERIOD_CURRENT,3);
+
+   double low3 =
+      iLow(_Symbol,PERIOD_CURRENT,1);
+
+   if(low3<=high1)
+      return false;
+
+   CurrentFVG.valid=true;
+
+   CurrentFVG.direction=
+      FVG_BULLISH;
+
+   CurrentFVG.upperPrice=
+      low3;
+
+   CurrentFVG.lowerPrice=
+      high1;
+
+   CurrentFVG.midpoint=
+      (low3+high1)/2.0;
+
+   CurrentFVG.size=
+      low3-high1;
+
+   CurrentFVG.created=
+      iTime(_Symbol,PERIOD_CURRENT,1);
+
+   return true;
+}
+
+//----------------------------------------------------
+
+bool DetectBearishFVG()
+{
+   ResetFVG();
+
+   double low1 =
+      iLow(_Symbol,PERIOD_CURRENT,3);
+
+   double high3 =
+      iHigh(_Symbol,PERIOD_CURRENT,1);
+
+   if(high3>=low1)
+      return false;
+
+   CurrentFVG.valid=true;
+
+   CurrentFVG.direction=
+      FVG_BEARISH;
+
+   CurrentFVG.upperPrice=
+      low1;
+
+   CurrentFVG.lowerPrice=
+      high3;
+
+   CurrentFVG.midpoint=
+      (low1+high3)/2.0;
+
+   CurrentFVG.size=
+      low1-high3;
+
+   CurrentFVG.created=
+      iTime(_Symbol,PERIOD_CURRENT,1);
+
+   return true;
+}
+
+//----------------------------------------------------
+
+double FVGSizeScore()
+{
+   double atr=
+      GetATR();
+
+   if(atr<=0)
+      return 0;
+
+   double ratio=
+      CurrentFVG.size/atr;
+
+   if(ratio>=1.50)
+      return 30;
+
+   if(ratio>=1.20)
+      return 25;
+
+   if(ratio>=1.00)
+      return 20;
+
+   if(ratio>=0.70)
+      return 15;
+
+   return 5;
+}
+
+//----------------------------------------------------
+
+double FVGDisplacementScore()
+{
+   if(CurrentDisplacementScore>=90)
+      return 25;
+
+   if(CurrentDisplacementScore>=80)
+      return 20;
+
+   if(CurrentDisplacementScore>=70)
+      return 15;
+
+   return 0;
+}
+
+//----------------------------------------------------
+
+double FVGFreshnessScore()
+{
+   int bars=
+      iBarShift(
+         _Symbol,
+         PERIOD_CURRENT,
+         CurrentFVG.created
+      );
+
+   if(bars<=3)
+      return 20;
+
+   if(bars<=8)
+      return 15;
+
+   if(bars<=15)
+      return 10;
+
+   return 5;
+}
+
+//----------------------------------------------------
+
+double FVGMitigationScore()
+{
+   if(CurrentFVG.touches==0)
+      return 15;
+
+   if(CurrentFVG.touches==1)
+      return 10;
+
+   if(CurrentFVG.touches==2)
+      return 5;
+
+   return 0;
+}
+
+//----------------------------------------------------
+
+double CalculateFVGScore()
+{
+   double score=0;
+
+   score+=FVGSizeScore();
+
+   score+=FVGDisplacementScore();
+
+   score+=FVGFreshnessScore();
+
+   score+=FVGMitigationScore();
+
+   return MathMin(score,100.0);
+}
+
+//----------------------------------------------------
+
+void UpdateFVG()
+{
+   ResetFVG();
+
+   if(DetectBullishFVG() ||
+      DetectBearishFVG())
+   {
+      CurrentFVG.score=
+         CalculateFVGScore();
+   }
+}
+
+//----------------------------------------------------
+
+bool ValidBullishFVG()
+{
+   return
+      CurrentFVG.valid &&
+      CurrentFVG.direction==
+      FVG_BULLISH &&
+      CurrentFVG.score>=
+      MinimumFVGScore;
+}
+
+//----------------------------------------------------
+
+bool ValidBearishFVG()
+{
+   return
+      CurrentFVG.valid &&
+      CurrentFVG.direction==
+      FVG_BEARISH &&
+      CurrentFVG.score>=
+      MinimumFVGScore;
+}
+
+
+
+//====================================================
+// SECTION 17 - FAIR VALUE GAP DATABASE ENGINE
+//====================================================
+
+#define MAX_FVGS 50
+
+FairValueGap FVGDatabase[MAX_FVGS];
+
+int TotalFVGs = 0;
+
+//----------------------------------------------------
+
+void ResetFVGDatabase()
+{
+   TotalFVGs = 0;
+
+   for(int i=0; i<MAX_FVGS; i++)
+      ZeroMemory(FVGDatabase[i]);
+}
+
+//----------------------------------------------------
+
+void AddFVG(FairValueGap fvg)
+{
+   if(!fvg.valid)
+      return;
+
+   if(TotalFVGs >= MAX_FVGS)
+   {
+      for(int i=1; i<MAX_FVGS; i++)
+         FVGDatabase[i-1] = FVGDatabase[i];
+
+      TotalFVGs = MAX_FVGS - 1;
+   }
+
+   FVGDatabase[TotalFVGs] = fvg;
+
+   TotalFVGs++;
+}
+
+
+//----------------------------------------------------
+
+void UpdateFVGTouches()
+{
+   double bid =
+      SymbolInfoDouble(
+         _Symbol,
+         SYMBOL_BID);
+
+   for(int i=0;i<TotalFVGs;i++)
+   {
+      if(!FVGDatabase[i].valid)
+         continue;
+
+      if(bid >= FVGDatabase[i].lowerPrice &&
+         bid <= FVGDatabase[i].upperPrice)
+      {
+         FVGDatabase[i].touches++;
+      }
+   }
+}
+
+//----------------------------------------------------
+
+void UpdateMitigationStatus()
+{
+   double bid =
+      SymbolInfoDouble(
+         _Symbol,
+         SYMBOL_BID);
+
+   for(int i=0;i<TotalFVGs;i++)
+   {
+      if(!FVGDatabase[i].valid)
+         continue;
+
+      if(FVGDatabase[i].direction ==
+         FVG_BULLISH)
+      {
+         if(bid <
+            FVGDatabase[i].lowerPrice)
+         {
+            FVGDatabase[i].mitigated = true;
+         }
+      }
+
+      if(FVGDatabase[i].direction ==
+         FVG_BEARISH)
+      {
+         if(bid >
+            FVGDatabase[i].upperPrice)
+         {
+            FVGDatabase[i].mitigated = true;
+         }
+      }
+   }
+}
+
+//----------------------------------------------------
+
+void RemoveMitigatedFVGs()
+{
+   for(int i=0;i<TotalFVGs;)
+   {
+      if(FVGDatabase[i].mitigated)
+      {
+         for(int j=i+1;j<TotalFVGs;j++)
+            FVGDatabase[j-1] =
+               FVGDatabase[j];
+
+         TotalFVGs--;
+
+         continue;
+      }
+
+      i++;
+   }
+}
+
+//----------------------------------------------------
+
+int BestBullishFVG()
+{
+   int index = -1;
+
+   double best = -1;
+
+   for(int i=0;i<TotalFVGs;i++)
+   {
+      if(!FVGDatabase[i].valid)
+         continue;
+
+      if(FVGDatabase[i].direction !=
+         FVG_BULLISH)
+         continue;
+
+      if(FVGDatabase[i].score > best)
+      {
+         best =
+            FVGDatabase[i].score;
+
+         index = i;
+      }
+   }
+
+   return index;
+}
+
+//----------------------------------------------------
+
+int BestBearishFVG()
+{
+   int index = -1;
+
+   double best = -1;
+
+   for(int i=0;i<TotalFVGs;i++)
+   {
+      if(!FVGDatabase[i].valid)
+         continue;
+
+      if(FVGDatabase[i].direction !=
+         FVG_BEARISH)
+         continue;
+
+      if(FVGDatabase[i].score > best)
+      {
+         best =
+            FVGDatabase[i].score;
+
+         index = i;
+      }
+   }
+
+   return index;
+}
+
+//----------------------------------------------------
+
+bool SelectBestBullishFVG()
+{
+   int idx =
+      BestBullishFVG();
+
+   if(idx < 0)
+      return false;
+
+   CurrentFVG =
+      FVGDatabase[idx];
+
+   return true;
+}
+
+//----------------------------------------------------
+
+bool SelectBestBearishFVG()
+{
+   int idx =
+      BestBearishFVG();
+
+   if(idx < 0)
+      return false;
+
+   CurrentFVG =
+      FVGDatabase[idx];
+
+   return true;
+}
+
+//----------------------------------------------------
+
+void UpdateFVGDatabase()
+{
+   UpdateFVG();
+
+   if(CurrentFVG.valid)
+      AddFVG(CurrentFVG);
+
+   UpdateFVGTouches();
+
+   UpdateMitigationStatus();
+
+   RemoveMitigatedFVGs();
+}
+
+
+
+
 
 
 
