@@ -6514,9 +6514,154 @@ void UpdateBreadButterEngine()
    CalculateBreadButterConfidence();
 }
 
+//----------------------------------------------------
+// Timeframe Index
+//----------------------------------------------------
+
+enum ENUM_BNB_TIMEFRAME
+{
+   BNB_M5 = 0,
+   BNB_M15,
+   BNB_H1,
+   BNB_TOTAL
+};
+
+//----------------------------------------------------
+// One Setup Per Timeframe
+//----------------------------------------------------
+
+BreadButterSetup BreadButterTF[BNB_TOTAL];
+
+int BreadButterStartBarTF[BNB_TOTAL];
+
+//----------------------------------------------------
+// Timeframe Mapping
+//----------------------------------------------------
+
+ENUM_TIMEFRAMES BreadButterTimeframes[BNB_TOTAL]=
+{
+   PERIOD_M5,
+   PERIOD_M15,
+   PERIOD_H1
+};
+
+//----------------------------------------------------
+// Timeframe Name
+//----------------------------------------------------
+
+string BreadButterTFName(int index)
+{
+   switch(index)
+   {
+      case BNB_M5:
+         return "M5";
+
+      case BNB_M15:
+         return "M15";
+
+      case BNB_H1:
+         return "H1";
+   }
+
+   return "";
+}
+
+//----------------------------------------------------
+// Reset Timeframe Setup
+//----------------------------------------------------
+
+void ResetBreadButterTF(int tf)
+{
+   ZeroMemory(BreadButterTF[tf]);
+
+   BreadButterTF[tf].state=
+      BNB_WAIT_LIQUIDITY;
+
+   BreadButterTF[tf].timeframe=
+      BreadButterTimeframes[tf];
+
+   BreadButterStartBarTF[tf]=-1;
+}
+
+//----------------------------------------------------
+// Initialize Bread Butter
+//----------------------------------------------------
+
+void InitializeBreadButterEngine()
+{
+   for(int tf=0;tf<BNB_TOTAL;tf++)
+      ResetBreadButterTF(tf);
+}
+
+//----------------------------------------------------
+// Highest Confidence Setup
+//----------------------------------------------------
+
+int BestBreadButterSetup()
+{
+   double best=0;
+
+   int index=-1;
+
+   for(int tf=0;tf<BNB_TOTAL;tf++)
+   {
+      if(!BreadButterTF[tf].valid)
+         continue;
+
+      if(BreadButterTF[tf].state!=
+         BNB_READY)
+         continue;
+
+      if(BreadButterTF[tf].confidence>
+         best)
+      {
+         best=
+            BreadButterTF[tf].confidence;
+
+         index=tf;
+      }
+   }
+
+   return index;
+}
 
 
+//----------------------------------------------------
+// Execution Priority
+//----------------------------------------------------
 
+int ExecutionPriority()
+{
+   int best=
+      BestBreadButterSetup();
+
+   if(best>=0)
+      return best;
+
+   return -1;
+}
+
+//----------------------------------------------------
+// Update Every Timeframe
+//----------------------------------------------------
+
+void UpdateBreadButterScanner()
+{
+   if(TradeM5)
+   {
+      // M5 scanner
+   }
+
+   if(TradeM15)
+   {
+      // M15 scanner
+   }
+
+   if(TradeH1)
+   {
+      // H1 scanner
+   }
+}
 
 
 
