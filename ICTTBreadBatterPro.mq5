@@ -3015,277 +3015,351 @@ bool CHOCHConfirmed(
 // SECTION 15 - INSTITUTIONAL DISPLACEMENT ENGINE
 //====================================================
 
-input bool EnableDisplacementFilter = true;
-
-input int MinimumDisplacementScore = 75;
-
-input bool EnableAdaptiveDisplacement = true;
-
+//----------------------------------------------------
+// Inputs
 //----------------------------------------------------
 
-double CurrentDisplacementScore = 0.0;
+input double MinimumDisplacementATR = 1.20;
+
+input int MinimumImpulseCandles = 2;
+
+input double MinimumClosePercent = 70.0;
 
 //----------------------------------------------------
+// Displacement State
+//----------------------------------------------------
 
-double BodyPercent(int shift)
+struct DisplacementState
 {
-   double range =
-      CandleRange(shift);
+   bool valid;
+
+   bool confirmed;
+
+   ENUM_DIRECTION direction;
+
+   double impulseRange;
+
+   double ATRMultiple;
+
+   double bodyPercent;
+
+   double closePercent;
+
+   int impulseCandles;
+
+   datetime time;
+};
+
+DisplacementState
+DisplacementData[ACTIVE_SCAN_TIMEFRAMES];
+
+//----------------------------------------------------
+// Reset
+//----------------------------------------------------
+
+void ResetDisplacement(
+   ENUM_TIMEFRAMES tf)
+{
+   int idx=
+      StructureIndex(tf);
+
+   if(idx<0)
+      return;
+
+   ZeroMemory(
+      DisplacementData[idx]);
+}
+
+//----------------------------------------------------
+// Close Position Percentage
+//----------------------------------------------------
+
+double CandleClosePercent(
+   ENUM_TIMEFRAMES tf,
+   int bar)
+{
+   double high=
+      iHigh(_Symbol,tf,bar);
+
+   double low=
+      iLow(_Symbol,tf,bar);
+
+   double close=
+      iClose(_Symbol,tf,bar);
+
+   double range=
+      high-low;
 
    if(range<=0)
       return 0;
 
+   //--------------------------------------
+   // Bullish candle
+   //--------------------------------------
+
+   if(close>=iOpen(_Symbol,tf,bar))
+      return
+      ((close-low)/range)*100.0;
+
+   //--------------------------------------
+   // Bearish candle
+   //--------------------------------------
+
    return
-      (CandleBodySize(shift)/range)*100.0;
+   ((high-close)/range)*100.0;
 }
 
 //----------------------------------------------------
-
-double UpperWick(int shift)
-{
-   return
-      iHigh(_Symbol,PERIOD_CURRENT,shift)-
-      MathMax(
-         iOpen(_Symbol,PERIOD_CURRENT,shift),
-         iClose(_Symbol,PERIOD_CURRENT,shift)
-      );
-}
-
+// Calculate Impulse Range
 //----------------------------------------------------
 
-double LowerWick(int shift)
-{
-   return
-      MathMin(
-         iOpen(_Symbol,PERIOD_CURRENT,shift),
-         iClose(_Symbol,PERIOD_CURRENT,shift)
-      )-
-      iLow(_Symbol,PERIOD_CURRENT,shift);
-}
-
-//----------------------------------------------------
-
-double BodyStrengthScore()
-{
-   double percent =
-      BodyPercent(1);
-
-   if(percent>=90)
-      return 25;
-
-   if(percent>=80)
-      return 22;
-
-   if(percent>=70)
-      return 18;
-
-   if(percent>=60)
-      return 12;
-
-   return 0;
-}
-
-//----------------------------------------------------
-
-double ATRExpansionScore()
+double ImpulseATR(
+   ENUM_TIMEFRAMES tf)
 {
    double atr=
-      GetATR();
+      GetATR(tf);
 
    if(atr<=0)
       return 0;
 
-   double body=
-      CandleBodySize(1);
-
-   double ratio=
-      body/atr;
-
-   if(ratio>=2.5)
-      return 25;
-
-   if(ratio>=2.0)
-      return 20;
-
-   if(ratio>=1.5)
-      return 15;
-
-   if(ratio>=1.2)
-      return 10;
-
-   return 0;
-}
-
-//----------------------------------------------------
-
-double ClosingStrengthScore()
-{
    double range=
-      CandleRange(1);
+      iHigh(_Symbol,tf,1)
+      -
+      iLow(_Symbol,tf,1);
 
-   if(range<=0)
-      return 0;
+   return
+      range/atr;
+}
 
-   double close=
-      iClose(_Symbol,PERIOD_CURRENT,1);
+//----------------------------------------------------
+// Strong Displacement
+//----------------------------------------------------
 
-   double high=
-      iHigh(_Symbol,PERIOD_CURRENT,1);
+bool StrongDisplacement(
+   ENUM_TIMEFRAMES tf)
+{
+   if(!BOSConfirmed(tf))
+      return false;
 
-   double low=
-      iLow(_Symbol,PERIOD_CURRENT,1);
+   if(ImpulseATR(tf)
+      <
+      MinimumDisplacementATR)
+      return false;
 
-   if(IsBullishCandle(1))
+   if(CandleBodyPercent(tf,1)
+      <
+      MinimumBodyPercent)
+      return false;
+
+   if(CandleClosePercent(tf,1)
+      <
+      MinimumClosePercent)
+      return false;
+
+   return true;
+}
+
+//----------------------------------------------------
+// Count Impulse Candles
+//----------------------------------------------------
+
+int CountImpulseCandles(
+   ENUM_TIMEFRAMES tf)
+{
+   int count=0;
+
+   for(int bar=1; bar<=5; bar++)
    {
-      double position=
-         (close-low)/range;
-
-      if(position>=0.90)
-         return 20;
-
-      if(position>=0.80)
-         return 15;
-
-      if(position>=0.70)
-         return 10;
+      if(CandleBodyPercent(tf,bar)>=MinimumBodyPercent)
+         count++;
+      else
+         break;
    }
 
-   if(IsBearishCandle(1))
-   {
-      double position=
-         (high-close)/range;
-
-      if(position>=0.90)
-         return 20;
-
-      if(position>=0.80)
-         return 15;
-
-      if(position>=0.70)
-         return 10;
-   }
-
-   return 0;
+   return count;
 }
 
 //----------------------------------------------------
-
-double WickQualityScore()
-{
-   double body=
-      CandleBodySize(1);
-
-   if(body<=0)
-      return 0;
-
-   double upper=
-      UpperWick(1);
-
-   double lower=
-      LowerWick(1);
-
-   double ratio=
-      MathMax(upper,lower)/body;
-
-   if(ratio<=0.10)
-      return 15;
-
-   if(ratio<=0.20)
-      return 10;
-
-   if(ratio<=0.30)
-      return 5;
-
-   return 0;
-}
-
-
+// Calculate Displacement Score
 //----------------------------------------------------
 
-double VolumeStrengthScore()
-{
-   long current=
-      iVolume(_Symbol,PERIOD_CURRENT,1);
-
-   double average=0;
-
-   for(int i=2;i<=21;i++)
-      average+=iVolume(
-         _Symbol,
-         PERIOD_CURRENT,
-         i);
-
-   average/=20.0;
-
-   if(average<=0)
-      return 0;
-
-   double ratio=
-      current/average;
-
-   if(ratio>=2.0)
-      return 15;
-
-   if(ratio>=1.6)
-      return 10;
-
-   if(ratio>=1.3)
-      return 5;
-
-   return 0;
-}
-
-//----------------------------------------------------
-
-double CalculateDisplacementScore()
+double DisplacementScore(
+   ENUM_TIMEFRAMES tf)
 {
    double score=0;
 
-   score+=BodyStrengthScore();
+   //------------------------------------------
+   // ATR Expansion
+   //------------------------------------------
 
-   score+=ATRExpansionScore();
+   double atr=ImpulseATR(tf);
 
-   score+=ClosingStrengthScore();
+   score+=MathMin(atr*20.0,40.0);
 
-   score+=WickQualityScore();
+   //------------------------------------------
+   // Candle Body
+   //------------------------------------------
 
-   score+=VolumeStrengthScore();
+   score+=
+      CandleBodyPercent(tf,1)
+      *0.30;
+
+   //------------------------------------------
+   // Close Position
+   //------------------------------------------
+
+   score+=
+      CandleClosePercent(tf,1)
+      *0.20;
+
+   //------------------------------------------
+   // Multi Candle Impulse
+   //------------------------------------------
+
+   score+=
+      CountImpulseCandles(tf)
+      *5.0;
 
    return
       MathMin(score,100.0);
 }
 
 //----------------------------------------------------
+// Detect Displacement
+//----------------------------------------------------
+
+void DetectDisplacement(
+   ENUM_TIMEFRAMES tf)
+{
+   int idx=
+      StructureIndex(tf);
+
+   if(idx<0)
+      return;
+
+   ResetDisplacement(tf);
+
+   //------------------------------------------
+
+   if(!StrongDisplacement(tf))
+      return;
+
+   DisplacementData[idx].valid=true;
+
+   DisplacementData[idx].confirmed=true;
+
+   DisplacementData[idx].direction=
+      StructureDirection(tf);
+
+   DisplacementData[idx].impulseRange=
+      iHigh(_Symbol,tf,1)
+      -
+      iLow(_Symbol,tf,1);
+
+   DisplacementData[idx].ATRMultiple=
+      ImpulseATR(tf);
+
+   DisplacementData[idx].bodyPercent=
+      CandleBodyPercent(tf,1);
+
+   DisplacementData[idx].closePercent=
+      CandleClosePercent(tf,1);
+
+   DisplacementData[idx].impulseCandles=
+      CountImpulseCandles(tf);
+
+   DisplacementData[idx].time=
+      iTime(_Symbol,tf,1);
+
+//----------------------------------------------------
+// Save Confirmed Structure
+//----------------------------------------------------
+
+SaveStructureCache(
+   tf,
+
+   StructureDirection(tf),
+
+   StructureBreakData[idx].structure,
+
+   LatestSwingHigh(tf).price,
+
+   LatestSwingLow(tf).price,
+
+   LatestSwingHigh(tf).barIndex,
+
+   LatestSwingLow(tf).barIndex,
+
+   StructureBreakData[idx].BOS,
+
+   StructureBreakData[idx].MSS,
+
+   StructureBreakData[idx].CHOCH,
+
+   true
+);
+}
+
+//----------------------------------------------------
+// Update Displacement Engine
+//----------------------------------------------------
 
 void UpdateDisplacementEngine()
 {
-   CurrentDisplacementScore=
-      CalculateDisplacementScore();
+   for(int i=0;
+       i<ACTIVE_SCAN_TIMEFRAMES;
+       i++)
+   {
+      DetectDisplacement(
+         StructureTF[i]);
+   }
+}
+
+//----------------------------------------------------
+// Helper Functions
+//----------------------------------------------------
+
+bool DisplacementConfirmed(
+   ENUM_TIMEFRAMES tf)
+{
+   int idx=
+      StructureIndex(tf);
+
+   if(idx<0)
+      return false;
+
+   return
+      DisplacementData[idx].confirmed;
 }
 
 //----------------------------------------------------
 
-bool InstitutionalBullishDisplacement()
+double CurrentDisplacementScore(
+   ENUM_TIMEFRAMES tf)
 {
-   if(!IsBullishCandle(1))
-      return false;
+   if(!DisplacementConfirmed(tf))
+      return 0;
 
    return
-      CurrentDisplacementScore>=
-      MinimumDisplacementScore;
+      DisplacementScore(tf);
 }
 
 //----------------------------------------------------
 
-bool InstitutionalBearishDisplacement()
+int CurrentImpulseCandles(
+   ENUM_TIMEFRAMES tf)
 {
-   if(!IsBearishCandle(1))
-      return false;
+   int idx=
+      StructureIndex(tf);
+
+   if(idx<0)
+      return 0;
 
    return
-      CurrentDisplacementScore>=
-      MinimumDisplacementScore;
+      DisplacementData[idx].impulseCandles;
 }
+
+
 
 
 //====================================================
