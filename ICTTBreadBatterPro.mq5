@@ -1072,7 +1072,7 @@ bool RiskTradingAllowed()
 
 
 //====================================================
-// SECTION 9 - SESSION INTELLIGENCE ENGINE (Part 2)
+// SECTION 9 - SESSION INTELLIGENCE ENGINE 
 //====================================================
 
 //----------------------------------------------------
@@ -1339,7 +1339,7 @@ void UpdateSessionEngine()
 
 
 //====================================================
-// SECTION 10 - MARKET CLASSIFICATION ENGINE (Part 1)
+// SECTION 10 - MARKET CLASSIFICATION ENGINE 
 //====================================================
 
 enum ENUM_MARKET_STATE
