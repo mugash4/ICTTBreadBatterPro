@@ -1629,6 +1629,523 @@ double MarketConfidence()
    return score;
 }
 
+//====================================================
+// SECTION 11 - MULTI-TIMEFRAME BIAS ENGINE (Part 1)
+//====================================================
+
+enum ENUM_MARKET_BIAS
+{
+   BIAS_NONE = 0,
+
+   BIAS_BULLISH,
+
+   BIAS_BEARISH
+};
+
+//----------------------------------------------------
+
+struct TimeframeBias
+{
+   ENUM_TIMEFRAMES timeframe;
+
+   ENUM_MARKET_BIAS bias;
+
+   double strength;
+
+   bool valid;
+};
+
+//----------------------------------------------------
+
+TimeframeBias Bias5M;
+
+TimeframeBias Bias15M;
+
+TimeframeBias Bias1H;
+
+//----------------------------------------------------
+
+ENUM_MARKET_BIAS OverallBias =
+   BIAS_NONE;
+
+//----------------------------------------------------
+
+ENUM_MARKET_BIAS DetectBias(
+   ENUM_TIMEFRAMES tf
+)
+{
+   double high1 =
+      iHigh(_Symbol,tf,5);
+
+   double high2 =
+      iHigh(_Symbol,tf,20);
+
+   double low1 =
+      iLow(_Symbol,tf,5);
+
+   double low2 =
+      iLow(_Symbol,tf,20);
+
+   if(high1>high2 &&
+      low1>low2)
+   {
+      return BIAS_BULLISH;
+   }
+
+   if(high1<high2 &&
+      low1<low2)
+   {
+      return BIAS_BEARISH;
+   }
+
+   return BIAS_NONE;
+}
+
+//----------------------------------------------------
+
+double BiasStrength(
+   ENUM_TIMEFRAMES tf
+)
+{
+   double atr =
+      iATR(_Symbol,tf,14);
+
+   double move =
+      MathAbs(
+         iClose(_Symbol,tf,5)
+         -
+         iClose(_Symbol,tf,20)
+      );
+
+   if(atr<=0)
+      return 0;
+
+   return
+      MathMin(
+         (move/atr)*25.0,
+         100.0
+      );
+}
+
+//----------------------------------------------------
+
+void UpdateBiasEngine()
+{
+   Bias5M.timeframe=
+      PERIOD_M5;
+
+   Bias5M.bias=
+      DetectBias(PERIOD_M5);
+
+   Bias5M.strength=
+      BiasStrength(PERIOD_M5);
+
+   Bias5M.valid=true;
+
+   //------------------------------------------------
+
+   Bias15M.timeframe=
+      PERIOD_M15;
+
+   Bias15M.bias=
+      DetectBias(PERIOD_M15);
+
+   Bias15M.strength=
+      BiasStrength(PERIOD_M15);
+
+   Bias15M.valid=true;
+
+   //------------------------------------------------
+
+   Bias1H.timeframe=
+      PERIOD_H1;
+
+   Bias1H.bias=
+      DetectBias(PERIOD_H1);
+
+   Bias1H.strength=
+      BiasStrength(PERIOD_H1);
+
+   Bias1H.valid=true;
+}
+
+//----------------------------------------------------
+
+void CalculateOverallBias()
+{
+   int bulls=0;
+
+   int bears=0;
+
+   if(Bias5M.bias==
+      BIAS_BULLISH)
+      bulls++;
+
+   if(Bias15M.bias==
+      BIAS_BULLISH)
+      bulls++;
+
+   if(Bias1H.bias==
+      BIAS_BULLISH)
+      bulls++;
+
+   if(Bias5M.bias==
+      BIAS_BEARISH)
+      bears++;
+
+   if(Bias15M.bias==
+      BIAS_BEARISH)
+      bears++;
+
+   if(Bias1H.bias==
+      BIAS_BEARISH)
+      bears++;
+
+   if(bulls>=2)
+   {
+      OverallBias=
+         BIAS_BULLISH;
+
+      return;
+   }
+
+   if(bears>=2)
+   {
+      OverallBias=
+         BIAS_BEARISH;
+
+      return;
+   }
+
+   OverallBias=
+      BIAS_NONE;
+}
+
+//----------------------------------------------------
+
+bool BullishBias()
+{
+   return
+      OverallBias==
+      BIAS_BULLISH;
+}
+
+//----------------------------------------------------
+
+bool BearishBias()
+{
+   return
+      OverallBias==
+      BIAS_BEARISH;
+}
+
+//----------------------------------------------------
+
+string BiasText()
+{
+   switch(OverallBias)
+   {
+      case BIAS_BULLISH:
+
+         return "BULLISH";
+
+      case BIAS_BEARISH:
+
+         return "BEARISH";
+
+      default:
+
+         return "NEUTRAL";
+   }
+}
+
+
+
+//====================================================
+// SECTION 12 - ADVANCED SWING DETECTION ENGINE
+//====================================================
+
+enum ENUM_SWING_TYPE
+{
+   SWING_NONE = 0,
+
+   SWING_HIGH,
+
+   SWING_LOW
+};
+
+//----------------------------------------------------
+
+struct SwingPoint
+{
+   datetime time;
+
+   double price;
+
+   int index;
+
+   ENUM_SWING_TYPE type;
+
+   bool strong;
+
+   bool protectedSwing;
+
+   bool liquidityTaken;
+
+   bool valid;
+};
+
+//----------------------------------------------------
+
+SwingPoint LatestSwingHigh;
+
+SwingPoint PreviousSwingHigh;
+
+SwingPoint LatestSwingLow;
+
+SwingPoint PreviousSwingLow;
+//----------------------------------------------------
+
+bool IsSwingHigh(
+   ENUM_TIMEFRAMES tf,
+   int shift
+)
+{
+   double candidate =
+      iHigh(_Symbol,tf,shift);
+
+   for(int i=1;i<=3;i++)
+   {
+      if(iHigh(_Symbol,tf,shift+i)>=candidate)
+         return false;
+
+      if(iHigh(_Symbol,tf,shift-i)>candidate)
+         return false;
+   }
+
+   return true;
+}
+
+//----------------------------------------------------
+
+bool IsSwingLow(
+   ENUM_TIMEFRAMES tf,
+   int shift
+)
+{
+   double candidate =
+      iLow(_Symbol,tf,shift);
+
+   for(int i=1;i<=3;i++)
+   {
+      if(iLow(_Symbol,tf,shift+i)<=candidate)
+         return false;
+
+      if(iLow(_Symbol,tf,shift-i)<candidate)
+         return false;
+   }
+
+   return true;
+}
+
+//----------------------------------------------------
+
+bool FindLatestSwingHigh(
+   ENUM_TIMEFRAMES tf,
+   SwingPoint &swing
+)
+{
+   swing.valid=false;
+
+   for(int i=5;i<300;i++)
+   {
+      if(IsSwingHigh(tf,i))
+      {
+         swing.valid=true;
+
+         swing.price=
+            iHigh(_Symbol,tf,i);
+
+         swing.time=
+            iTime(_Symbol,tf,i);
+
+         swing.index=i;
+
+         swing.type=SWING_HIGH;
+
+         return true;
+      }
+   }
+
+   return false;
+}
+
+//----------------------------------------------------
+
+bool FindLatestSwingLow(
+   ENUM_TIMEFRAMES tf,
+   SwingPoint &swing
+)
+{
+   swing.valid=false;
+
+   for(int i=5;i<300;i++)
+   {
+      if(IsSwingLow(tf,i))
+      {
+         swing.valid=true;
+
+         swing.price=
+            iLow(_Symbol,tf,i);
+
+         swing.time=
+            iTime(_Symbol,tf,i);
+
+         swing.index=i;
+
+         swing.type=SWING_LOW;
+
+         return true;
+      }
+   }
+
+   return false;
+}
+
+//----------------------------------------------------
+
+bool IsStrongSwingHigh(
+   SwingPoint swing
+)
+{
+   if(!swing.valid)
+      return false;
+
+   double atr =
+      GetATR();
+
+   if(atr<=0)
+      return false;
+
+   double move =
+      swing.price -
+      iLow(
+         _Symbol,
+         PERIOD_CURRENT,
+         swing.index
+      );
+
+   return move>=atr;
+}
+
+//----------------------------------------------------
+
+bool IsStrongSwingLow(
+   SwingPoint swing
+)
+{
+   if(!swing.valid)
+      return false;
+
+   double atr=
+      GetATR();
+
+   if(atr<=0)
+      return false;
+
+   double move=
+      iHigh(
+         _Symbol,
+         PERIOD_CURRENT,
+         swing.index
+      )
+      -
+      swing.price;
+
+   return move>=atr;
+}
+
+//----------------------------------------------------
+
+void UpdateSwingEngine()
+{
+   FindLatestSwingHigh(
+      PERIOD_CURRENT,
+      LatestSwingHigh
+   );
+
+   FindLatestSwingLow(
+      PERIOD_CURRENT,
+      LatestSwingLow
+   );
+
+   LatestSwingHigh.strong =
+      IsStrongSwingHigh(
+         LatestSwingHigh
+      );
+
+   LatestSwingLow.strong =
+      IsStrongSwingLow(
+         LatestSwingLow
+      );
+}
+
+//----------------------------------------------------
+
+bool HigherHigh()
+{
+   if(!LatestSwingHigh.valid ||
+      !PreviousSwingHigh.valid)
+      return false;
+
+   return
+      LatestSwingHigh.price >
+      PreviousSwingHigh.price;
+}
+
+//----------------------------------------------------
+
+bool LowerLow()
+{
+   if(!LatestSwingLow.valid ||
+      !PreviousSwingLow.valid)
+      return false;
+
+   return
+      LatestSwingLow.price <
+      PreviousSwingLow.price;
+}
+
+//----------------------------------------------------
+
+bool HigherLow()
+{
+   if(!LatestSwingLow.valid ||
+      !PreviousSwingLow.valid)
+      return false;
+
+   return
+      LatestSwingLow.price >
+      PreviousSwingLow.price;
+}
+
+//----------------------------------------------------
+
+bool LowerHigh()
+{
+   if(!LatestSwingHigh.valid ||
+      !PreviousSwingHigh.valid)
+      return false;
+
+   return
+      LatestSwingHigh.price <
+      PreviousSwingHigh.price;
+}
+
+
+
+
+
 
 
 
