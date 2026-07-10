@@ -4569,6 +4569,752 @@ double StructureAgreementScore()
 }
 
 
+//====================================================
+// SECTION 22 - LIQUIDITY ENGINE
+//====================================================
+
+//----------------------------------------------------
+// Liquidity Types
+//----------------------------------------------------
+
+enum ENUM_LIQUIDITY_TYPE
+{
+   LIQ_NONE = 0,
+
+   LIQ_EQUAL_HIGHS,
+   LIQ_EQUAL_LOWS,
+
+   LIQ_BUY_SIDE,
+   LIQ_SELL_SIDE,
+
+   LIQ_INTERNAL,
+   LIQ_EXTERNAL,
+
+   LIQ_SWEEP_BUY,
+   LIQ_SWEEP_SELL
+};
+
+//----------------------------------------------------
+// Liquidity State
+//----------------------------------------------------
+
+enum ENUM_LIQUIDITY_STATE
+{
+   LIQ_STATE_IDLE = 0,
+   LIQ_STATE_BUILDING,
+   LIQ_STATE_SWEPT,
+   LIQ_STATE_CONFIRMED
+};
+
+//----------------------------------------------------
+// Liquidity Zone
+//----------------------------------------------------
+
+struct LiquidityZone
+{
+   bool valid;
+
+   ENUM_LIQUIDITY_TYPE type;
+
+   ENUM_TIMEFRAMES timeframe;
+
+   double high;
+
+   double low;
+
+   double midpoint;
+
+   datetime created;
+
+   datetime sweptTime;
+
+   bool swept;
+
+   bool internal;
+
+   bool external;
+
+   int touches;
+
+   double strength;
+
+   double score;
+};
+
+//----------------------------------------------------
+// Liquidity Database
+//----------------------------------------------------
+
+#define MAX_LIQUIDITY_ZONES 300
+
+LiquidityZone LiquidityDatabase[MAX_LIQUIDITY_ZONES];
+
+int TotalLiquidityZones = 0;
+
+//----------------------------------------------------
+// Current Active Liquidity
+//----------------------------------------------------
+
+LiquidityZone CurrentLiquidity;
+
+//----------------------------------------------------
+// Inputs
+//----------------------------------------------------
+
+input bool EnableLiquidityEngine = true;
+
+input int EqualHighLowTolerancePoints = 10;
+
+input int MinimumLiquidityScore = 75;
+
+input int LiquidityLookbackBars = 200;
+
+input bool RequireLiquiditySweep = true;
+
+input bool EnableInternalLiquidity = true;
+
+input bool EnableExternalLiquidity = true;
+
+//----------------------------------------------------
+// Reset Current Liquidity
+//----------------------------------------------------
+
+void ResetLiquidity()
+{
+   ZeroMemory(CurrentLiquidity);
+
+   CurrentLiquidity.valid = false;
+
+   CurrentLiquidity.type = LIQ_NONE;
+}
+
+//----------------------------------------------------
+// Initialize Database
+//----------------------------------------------------
+
+void InitializeLiquidityDatabase()
+{
+   TotalLiquidityZones = 0;
+
+   for(int i=0;i<MAX_LIQUIDITY_ZONES;i++)
+      ZeroMemory(LiquidityDatabase[i]);
+}
+
+//----------------------------------------------------
+// Add Liquidity Zone
+//----------------------------------------------------
+
+void AddLiquidityZone(LiquidityZone zone)
+{
+   if(!zone.valid)
+      return;
+
+   if(TotalLiquidityZones >= MAX_LIQUIDITY_ZONES)
+   {
+      for(int i=1;i<MAX_LIQUIDITY_ZONES;i++)
+         LiquidityDatabase[i-1]=LiquidityDatabase[i];
+
+      TotalLiquidityZones=MAX_LIQUIDITY_ZONES-1;
+   }
+
+   LiquidityDatabase[TotalLiquidityZones]=zone;
+
+   TotalLiquidityZones++;
+}
+
+//----------------------------------------------------
+// Equal High Detection
+//----------------------------------------------------
+
+bool DetectEqualHighs()
+{
+   int tolerance=EqualHighLowTolerancePoints;
+
+   for(int i=5;i<LiquidityLookbackBars;i++)
+   {
+      double high1=iHigh(_Symbol,PERIOD_CURRENT,i);
+
+      for(int j=i+2;j<LiquidityLookbackBars;j++)
+      {
+         double high2=iHigh(_Symbol,PERIOD_CURRENT,j);
+
+         if(MathAbs(high1-high2)<=tolerance*_Point)
+         {
+            ResetLiquidity();
+
+            CurrentLiquidity.valid=true;
+            CurrentLiquidity.type=LIQ_EQUAL_HIGHS;
+            CurrentLiquidity.timeframe=PERIOD_CURRENT;
+
+            CurrentLiquidity.high=
+               MathMax(high1,high2);
+
+            CurrentLiquidity.low=
+               MathMin(high1,high2);
+
+            CurrentLiquidity.midpoint=
+               (CurrentLiquidity.high+
+                CurrentLiquidity.low)/2.0;
+
+            CurrentLiquidity.created=
+               TimeCurrent();
+
+            CurrentLiquidity.touches=2;
+
+            AddLiquidityZone(CurrentLiquidity);
+
+            return true;
+         }
+      }
+   }
+
+   return false;
+}
+
+//----------------------------------------------------
+// Equal Low Detection
+//----------------------------------------------------
+
+bool DetectEqualLows()
+{
+   int tolerance=EqualHighLowTolerancePoints;
+
+   for(int i=5;i<LiquidityLookbackBars;i++)
+   {
+      double low1=iLow(_Symbol,PERIOD_CURRENT,i);
+
+      for(int j=i+2;j<LiquidityLookbackBars;j++)
+      {
+         double low2=iLow(_Symbol,PERIOD_CURRENT,j);
+
+         if(MathAbs(low1-low2)<=tolerance*_Point)
+         {
+            ResetLiquidity();
+
+            CurrentLiquidity.valid=true;
+            CurrentLiquidity.type=LIQ_EQUAL_LOWS;
+            CurrentLiquidity.timeframe=PERIOD_CURRENT;
+
+            CurrentLiquidity.high=
+               MathMax(low1,low2);
+
+            CurrentLiquidity.low=
+               MathMin(low1,low2);
+
+            CurrentLiquidity.midpoint=
+               (CurrentLiquidity.high+
+                CurrentLiquidity.low)/2.0;
+
+            CurrentLiquidity.created=
+               TimeCurrent();
+
+            CurrentLiquidity.touches=2;
+
+            AddLiquidityZone(CurrentLiquidity);
+
+            return true;
+         }
+      }
+   }
+
+   return false;
+}
+
+//----------------------------------------------------
+// Buy Side Liquidity
+//----------------------------------------------------
+
+bool DetectBuySideLiquidity()
+{
+   if(!DetectEqualHighs())
+      return false;
+
+   CurrentLiquidity.type=LIQ_BUY_SIDE;
+
+   return true;
+}
+
+//----------------------------------------------------
+// Sell Side Liquidity
+//----------------------------------------------------
+
+bool DetectSellSideLiquidity()
+{
+   if(!DetectEqualLows())
+      return false;
+
+   CurrentLiquidity.type=LIQ_SELL_SIDE;
+
+   return true;
+}
+
+//----------------------------------------------------
+// Internal Liquidity
+//----------------------------------------------------
+
+bool DetectInternalLiquidity()
+{
+   if(!EnableInternalLiquidity)
+      return false;
+
+   double recentHigh=
+      iHigh(_Symbol,PERIOD_CURRENT,5);
+
+   double previousHigh=
+      iHigh(_Symbol,PERIOD_CURRENT,20);
+
+   if(recentHigh<previousHigh)
+   {
+      CurrentLiquidity.internal=true;
+      return true;
+   }
+
+   double recentLow=
+      iLow(_Symbol,PERIOD_CURRENT,5);
+
+   double previousLow=
+      iLow(_Symbol,PERIOD_CURRENT,20);
+
+   if(recentLow>previousLow)
+   {
+      CurrentLiquidity.internal=true;
+      return true;
+   }
+
+   return false;
+}
+
+//----------------------------------------------------
+// External Liquidity
+//----------------------------------------------------
+
+bool DetectExternalLiquidity()
+{
+   if(!EnableExternalLiquidity)
+      return false;
+
+   double highest=
+      iHigh(_Symbol,PERIOD_CURRENT,
+      iHighest(_Symbol,
+               PERIOD_CURRENT,
+               MODE_HIGH,
+               LiquidityLookbackBars,
+               1));
+
+   double lowest=
+      iLow(_Symbol,PERIOD_CURRENT,
+      iLowest(_Symbol,
+              PERIOD_CURRENT,
+              MODE_LOW,
+              LiquidityLookbackBars,
+              1));
+
+   double bid=
+      SymbolInfoDouble(_Symbol,SYMBOL_BID);
+
+   if(bid>=highest || bid<=lowest)
+   {
+      CurrentLiquidity.external=true;
+      return true;
+   }
+
+   return false;
+}
+
+//----------------------------------------------------
+// Bullish Liquidity Sweep
+// (Sell-side liquidity taken)
+//----------------------------------------------------
+
+bool DetectBullishLiquiditySweep()
+{
+   if(!DetectSellSideLiquidity())
+      return false;
+
+   double previousLow=iLow(_Symbol,PERIOD_CURRENT,2);
+   double currentLow=iLow(_Symbol,PERIOD_CURRENT,1);
+   double currentClose=iClose(_Symbol,PERIOD_CURRENT,1);
+
+   if(currentLow>=previousLow)
+      return false;
+
+   if(currentClose<=previousLow)
+      return false;
+
+   CurrentLiquidity.swept=true;
+   CurrentLiquidity.sweptTime=TimeCurrent();
+   CurrentLiquidity.type=LIQ_SWEEP_SELL;
+
+   return true;
+}
+
+//----------------------------------------------------
+// Bearish Liquidity Sweep
+// (Buy-side liquidity taken)
+//----------------------------------------------------
+
+bool DetectBearishLiquiditySweep()
+{
+   if(!DetectBuySideLiquidity())
+      return false;
+
+   double previousHigh=iHigh(_Symbol,PERIOD_CURRENT,2);
+   double currentHigh=iHigh(_Symbol,PERIOD_CURRENT,1);
+   double currentClose=iClose(_Symbol,PERIOD_CURRENT,1);
+
+   if(currentHigh<=previousHigh)
+      return false;
+
+   if(currentClose>=previousHigh)
+      return false;
+
+   CurrentLiquidity.swept=true;
+   CurrentLiquidity.sweptTime=TimeCurrent();
+   CurrentLiquidity.type=LIQ_SWEEP_BUY;
+
+   return true;
+}
+
+//----------------------------------------------------
+// Liquidity Freshness Score
+//----------------------------------------------------
+
+double LiquidityFreshnessScore(datetime created)
+{
+   double age=
+      (TimeCurrent()-created)/60.0;
+
+   if(age<=30)
+      return 30;
+
+   if(age<=120)
+      return 25;
+
+   if(age<=360)
+      return 20;
+
+   if(age<=720)
+      return 15;
+
+   return 10;
+}
+
+//----------------------------------------------------
+// Touch Score
+//----------------------------------------------------
+
+double LiquidityTouchScore(int touches)
+{
+   if(touches>=5)
+      return 30;
+
+   if(touches==4)
+      return 25;
+
+   if(touches==3)
+      return 20;
+
+   if(touches==2)
+      return 15;
+
+   return 5;
+}
+
+//----------------------------------------------------
+// Sweep Score
+//----------------------------------------------------
+
+double LiquiditySweepScore()
+{
+   if(CurrentLiquidity.swept)
+      return 40;
+
+   return 0;
+}
+
+//----------------------------------------------------
+// Internal / External Score
+//----------------------------------------------------
+
+double LiquidityPositionScore()
+{
+   double score=0;
+
+   if(CurrentLiquidity.internal)
+      score+=15;
+
+   if(CurrentLiquidity.external)
+      score+=15;
+
+   return score;
+}
+
+//----------------------------------------------------
+// Calculate Overall Liquidity Score
+//----------------------------------------------------
+
+double CalculateLiquidityScore()
+{
+   double score=0;
+
+   score+=LiquidityFreshnessScore(
+      CurrentLiquidity.created);
+
+   score+=LiquidityTouchScore(
+      CurrentLiquidity.touches);
+
+   score+=LiquiditySweepScore();
+
+   score+=LiquidityPositionScore();
+
+   if(score>100)
+      score=100;
+
+   CurrentLiquidity.score=score;
+
+   return score;
+}
+
+//----------------------------------------------------
+// Valid Liquidity
+//----------------------------------------------------
+
+bool ValidLiquidity()
+{
+   if(!CurrentLiquidity.valid)
+      return false;
+
+   if(CurrentLiquidity.score<
+      MinimumLiquidityScore)
+      return false;
+
+   return true;
+}
+
+//----------------------------------------------------
+// Update Current Liquidity
+//----------------------------------------------------
+
+void UpdateLiquidity()
+{
+   ResetLiquidity();
+
+   DetectBullishLiquiditySweep();
+
+   DetectBearishLiquiditySweep();
+
+   DetectInternalLiquidity();
+
+   DetectExternalLiquidity();
+
+   if(CurrentLiquidity.valid)
+   {
+      CurrentLiquidity.score=
+         CalculateLiquidityScore();
+
+      AddLiquidityZone(CurrentLiquidity);
+   }
+}
+
+
+//----------------------------------------------------
+// Is Duplicate Liquidity Zone
+//----------------------------------------------------
+
+bool IsDuplicateLiquidityZone(LiquidityZone zone)
+{
+   for(int i=0;i<TotalLiquidityZones;i++)
+   {
+      if(!LiquidityDatabase[i].valid)
+         continue;
+
+      if(LiquidityDatabase[i].type!=zone.type)
+         continue;
+
+      if(MathAbs(
+         LiquidityDatabase[i].midpoint-
+         zone.midpoint)<=(_Point*5))
+      {
+         return true;
+      }
+   }
+
+   return false;
+}
+
+//----------------------------------------------------
+// Save Liquidity Zone
+//----------------------------------------------------
+
+void SaveLiquidityZone(LiquidityZone zone)
+{
+   if(!zone.valid)
+      return;
+
+   if(IsDuplicateLiquidityZone(zone))
+      return;
+
+   AddLiquidityZone(zone);
+}
+
+//----------------------------------------------------
+// Mark Mitigated Liquidity
+//----------------------------------------------------
+
+void UpdateLiquidityMitigation()
+{
+   double bid=
+      SymbolInfoDouble(_Symbol,SYMBOL_BID);
+
+   for(int i=0;i<TotalLiquidityZones;i++)
+   {
+      if(!LiquidityDatabase[i].valid)
+         continue;
+
+      if(LiquidityDatabase[i].swept)
+         continue;
+
+      if(bid<=LiquidityDatabase[i].high &&
+         bid>=LiquidityDatabase[i].low)
+      {
+         LiquidityDatabase[i].swept=true;
+         LiquidityDatabase[i].sweptTime=
+            TimeCurrent();
+      }
+   }
+}
+
+//----------------------------------------------------
+// Remove Old Liquidity
+//----------------------------------------------------
+
+void CleanLiquidityDatabase()
+{
+   datetime now=TimeCurrent();
+
+   for(int i=0;i<TotalLiquidityZones;i++)
+   {
+      if(!LiquidityDatabase[i].valid)
+         continue;
+
+      if((now-
+         LiquidityDatabase[i].created)>
+         (7*24*60*60))
+      {
+         LiquidityDatabase[i].valid=false;
+      }
+   }
+}
+
+//----------------------------------------------------
+// Best Liquidity Zone
+//----------------------------------------------------
+
+LiquidityZone GetBestLiquidityZone()
+{
+   LiquidityZone best;
+
+   ZeroMemory(best);
+
+   double bestScore=0;
+
+   for(int i=0;i<TotalLiquidityZones;i++)
+   {
+      if(!LiquidityDatabase[i].valid)
+         continue;
+
+      if(LiquidityDatabase[i].score>
+         bestScore)
+      {
+         bestScore=
+            LiquidityDatabase[i].score;
+
+         best=
+            LiquidityDatabase[i];
+      }
+   }
+
+   return best;
+}
+
+//----------------------------------------------------
+// Highest Liquidity Score
+//----------------------------------------------------
+
+double HighestLiquidityScore()
+{
+   double score=0;
+
+   for(int i=0;i<TotalLiquidityZones;i++)
+   {
+      if(!LiquidityDatabase[i].valid)
+         continue;
+
+      if(LiquidityDatabase[i].score>score)
+         score=
+            LiquidityDatabase[i].score;
+   }
+
+   return score;
+}
+
+//----------------------------------------------------
+// Has Valid Liquidity
+//----------------------------------------------------
+
+bool HasValidLiquidity()
+{
+   LiquidityZone zone=
+      GetBestLiquidityZone();
+
+   if(!zone.valid)
+      return false;
+
+   return
+      zone.score>=MinimumLiquidityScore;
+}
+
+//----------------------------------------------------
+// Current Liquidity Direction
+//----------------------------------------------------
+
+ENUM_DIRECTION LiquidityDirection()
+{
+   LiquidityZone zone=
+      GetBestLiquidityZone();
+
+   switch(zone.type)
+   {
+      case LIQ_SWEEP_SELL:
+         return DIRECTION_BULLISH;
+
+      case LIQ_SWEEP_BUY:
+         return DIRECTION_BEARISH;
+
+      default:
+         return DIRECTION_NONE;
+   }
+}
+
+//----------------------------------------------------
+// Master Liquidity Update
+//----------------------------------------------------
+
+void UpdateLiquidityEngine()
+{
+   if(!EnableLiquidityEngine)
+      return;
+
+   UpdateLiquidity();
+
+   UpdateLiquidityMitigation();
+
+   CleanLiquidityDatabase();
+
+   CurrentLiquidity=
+      GetBestLiquidityZone();
+}
+
 
 
 
