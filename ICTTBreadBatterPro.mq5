@@ -4287,6 +4287,292 @@ bool ValidStructure()
 }
 
 
+//====================================================
+// SECTION 21 - STRUCTURE MATRIX ENGINE
+//====================================================
+
+enum ENUM_STRUCTURE_STATE
+{
+   STRUCTURE_UNKNOWN = 0,
+   STRUCTURE_BULLISH,
+   STRUCTURE_BEARISH,
+   STRUCTURE_TRANSITION
+};
+
+struct StructureMatrix
+{
+   ENUM_TIMEFRAMES timeframe;
+
+   ENUM_STRUCTURE_STATE state;
+
+   bool HigherHigh;
+   bool HigherLow;
+
+   bool LowerHigh;
+   bool LowerLow;
+
+   bool BullishBOS;
+   bool BearishBOS;
+
+   bool BullishCHOCH;
+   bool BearishCHOCH;
+
+   bool Premium;
+   bool Discount;
+
+   bool InternalLiquidityTaken;
+   bool ExternalLiquidityTaken;
+
+   bool FVGPresent;
+
+   double TrendStrength;
+
+   double Confidence;
+
+   datetime LastUpdate;
+};
+
+//----------------------------------------------------
+// Global Structure Matrices
+//----------------------------------------------------
+
+StructureMatrix MatrixM5;
+StructureMatrix MatrixM15;
+StructureMatrix MatrixH1;
+
+//----------------------------------------------------
+
+void InitializeMatrix(
+   StructureMatrix &matrix,
+   ENUM_TIMEFRAMES tf
+)
+{
+   matrix.timeframe=tf;
+
+   matrix.state=STRUCTURE_UNKNOWN;
+
+   matrix.HigherHigh=false;
+   matrix.HigherLow=false;
+
+   matrix.LowerHigh=false;
+   matrix.LowerLow=false;
+
+   matrix.BullishBOS=false;
+   matrix.BearishBOS=false;
+
+   matrix.BullishCHOCH=false;
+   matrix.BearishCHOCH=false;
+
+   matrix.Premium=false;
+   matrix.Discount=false;
+
+   matrix.InternalLiquidityTaken=false;
+   matrix.ExternalLiquidityTaken=false;
+
+   matrix.FVGPresent=false;
+
+   matrix.TrendStrength=0;
+
+   matrix.Confidence=0;
+
+   matrix.LastUpdate=0;
+}
+
+//----------------------------------------------------
+
+void InitializeStructureMatrices()
+{
+   InitializeMatrix(
+      MatrixM5,
+      PERIOD_M5
+   );
+
+   InitializeMatrix(
+      MatrixM15,
+      PERIOD_M15
+   );
+
+   InitializeMatrix(
+      MatrixH1,
+      PERIOD_H1
+   );
+}
+
+//----------------------------------------------------
+
+bool MatrixHigherHigh(
+   ENUM_TIMEFRAMES tf
+)
+{
+   double h1=iHigh(_Symbol,tf,5);
+   double h2=iHigh(_Symbol,tf,20);
+
+   return h1>h2;
+}
+
+//----------------------------------------------------
+
+bool MatrixHigherLow(
+   ENUM_TIMEFRAMES tf
+)
+{
+   double l1=iLow(_Symbol,tf,5);
+   double l2=iLow(_Symbol,tf,20);
+
+   return l1>l2;
+}
+
+//----------------------------------------------------
+
+bool MatrixLowerHigh(
+   ENUM_TIMEFRAMES tf
+)
+{
+   double h1=iHigh(_Symbol,tf,5);
+   double h2=iHigh(_Symbol,tf,20);
+
+   return h1<h2;
+}
+
+//----------------------------------------------------
+
+bool MatrixLowerLow(
+   ENUM_TIMEFRAMES tf
+)
+{
+   double l1=iLow(_Symbol,tf,5);
+   double l2=iLow(_Symbol,tf,20);
+
+   return l1<l2;
+}
+
+//----------------------------------------------------
+
+ENUM_STRUCTURE_STATE GetStructureState(
+   ENUM_TIMEFRAMES tf
+)
+{
+   bool HH=MatrixHigherHigh(tf);
+   bool HL=MatrixHigherLow(tf);
+
+   bool LH=MatrixLowerHigh(tf);
+   bool LL=MatrixLowerLow(tf);
+
+   if(HH && HL)
+      return STRUCTURE_BULLISH;
+
+   if(LH && LL)
+      return STRUCTURE_BEARISH;
+
+   return STRUCTURE_TRANSITION;
+}
+
+//----------------------------------------------------
+
+void UpdateMatrix(
+   StructureMatrix &matrix
+)
+{
+   matrix.state=
+      GetStructureState(
+         matrix.timeframe
+      );
+
+   matrix.HigherHigh=
+      MatrixHigherHigh(
+         matrix.timeframe
+      );
+
+   matrix.HigherLow=
+      MatrixHigherLow(
+         matrix.timeframe
+      );
+
+   matrix.LowerHigh=
+      MatrixLowerHigh(
+         matrix.timeframe
+      );
+
+   matrix.LowerLow=
+      MatrixLowerLow(
+         matrix.timeframe
+      );
+
+   matrix.LastUpdate=
+      TimeCurrent();
+}
+
+//----------------------------------------------------
+
+void UpdateStructureMatrix()
+{
+   UpdateMatrix(MatrixM5);
+
+   UpdateMatrix(MatrixM15);
+
+   UpdateMatrix(MatrixH1);
+}
+
+//----------------------------------------------------
+
+ENUM_STRUCTURE_STATE OverallStructure()
+{
+   int bulls=0;
+   int bears=0;
+
+   if(MatrixM5.state==STRUCTURE_BULLISH)
+      bulls++;
+
+   if(MatrixM15.state==STRUCTURE_BULLISH)
+      bulls++;
+
+   if(MatrixH1.state==STRUCTURE_BULLISH)
+      bulls++;
+
+   if(MatrixM5.state==STRUCTURE_BEARISH)
+      bears++;
+
+   if(MatrixM15.state==STRUCTURE_BEARISH)
+      bears++;
+
+   if(MatrixH1.state==STRUCTURE_BEARISH)
+      bears++;
+
+   if(bulls>=2)
+      return STRUCTURE_BULLISH;
+
+   if(bears>=2)
+      return STRUCTURE_BEARISH;
+
+   return STRUCTURE_TRANSITION;
+}
+
+//----------------------------------------------------
+
+double StructureAgreementScore()
+{
+   int agreement=0;
+
+   ENUM_STRUCTURE_STATE overall=
+      OverallStructure();
+
+   if(MatrixM5.state==overall)
+      agreement++;
+
+   if(MatrixM15.state==overall)
+      agreement++;
+
+   if(MatrixH1.state==overall)
+      agreement++;
+
+   return agreement*33.33;
+}
+
+
+
+
+
+
 
 
 
