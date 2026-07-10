@@ -1862,725 +1862,772 @@ string BiasText()
 
 
 //====================================================
-// SECTION 12 - ADVANCED SWING DETECTION ENGINE
+// SECTION 12 - PROFESSIONAL ICT SWING ENGINE
 //====================================================
 
-enum ENUM_SWING_TYPE
-{
-   SWING_NONE = 0,
-
-   SWING_HIGH,
-
-   SWING_LOW
-};
-
 //----------------------------------------------------
-
-struct SwingPoint
-{
-   datetime time;
-
-   double price;
-
-   int index;
-
-   ENUM_SWING_TYPE type;
-
-   bool strong;
-
-   bool protectedSwing;
-
-   bool liquidityTaken;
-
-   bool valid;
-};
-
-//----------------------------------------------------
-
-SwingPoint LatestSwingHigh;
-
-SwingPoint PreviousSwingHigh;
-
-SwingPoint LatestSwingLow;
-
-SwingPoint PreviousSwingLow;
-//----------------------------------------------------
-
-bool IsSwingHigh(
-   ENUM_TIMEFRAMES tf,
-   int shift
-)
-{
-   double candidate =
-      iHigh(_Symbol,tf,shift);
-
-   for(int i=1;i<=3;i++)
-   {
-      if(iHigh(_Symbol,tf,shift+i)>=candidate)
-         return false;
-
-      if(iHigh(_Symbol,tf,shift-i)>candidate)
-         return false;
-   }
-
-   return true;
-}
-
-//----------------------------------------------------
-
-bool IsSwingLow(
-   ENUM_TIMEFRAMES tf,
-   int shift
-)
-{
-   double candidate =
-      iLow(_Symbol,tf,shift);
-
-   for(int i=1;i<=3;i++)
-   {
-      if(iLow(_Symbol,tf,shift+i)<=candidate)
-         return false;
-
-      if(iLow(_Symbol,tf,shift-i)<candidate)
-         return false;
-   }
-
-   return true;
-}
-
-//----------------------------------------------------
-
-bool FindLatestSwingHigh(
-   ENUM_TIMEFRAMES tf,
-   SwingPoint &swing
-)
-{
-   swing.valid=false;
-
-   for(int i=5;i<300;i++)
-   {
-      if(IsSwingHigh(tf,i))
-      {
-         swing.valid=true;
-
-         swing.price=
-            iHigh(_Symbol,tf,i);
-
-         swing.time=
-            iTime(_Symbol,tf,i);
-
-         swing.index=i;
-
-         swing.type=SWING_HIGH;
-
-         return true;
-      }
-   }
-
-   return false;
-}
-
-//----------------------------------------------------
-
-bool FindLatestSwingLow(
-   ENUM_TIMEFRAMES tf,
-   SwingPoint &swing
-)
-{
-   swing.valid=false;
-
-   for(int i=5;i<300;i++)
-   {
-      if(IsSwingLow(tf,i))
-      {
-         swing.valid=true;
-
-         swing.price=
-            iLow(_Symbol,tf,i);
-
-         swing.time=
-            iTime(_Symbol,tf,i);
-
-         swing.index=i;
-
-         swing.type=SWING_LOW;
-
-         return true;
-      }
-   }
-
-   return false;
-}
-
-//----------------------------------------------------
-
-bool IsStrongSwingHigh(
-   SwingPoint swing
-)
-{
-   if(!swing.valid)
-      return false;
-
-   double atr =
-      GetATR();
-
-   if(atr<=0)
-      return false;
-
-   double move =
-      swing.price -
-      iLow(
-         _Symbol,
-         PERIOD_CURRENT,
-         swing.index
-      );
-
-   return move>=atr;
-}
-
-//----------------------------------------------------
-
-bool IsStrongSwingLow(
-   SwingPoint swing
-)
-{
-   if(!swing.valid)
-      return false;
-
-   double atr=
-      GetATR();
-
-   if(atr<=0)
-      return false;
-
-   double move=
-      iHigh(
-         _Symbol,
-         PERIOD_CURRENT,
-         swing.index
-      )
-      -
-      swing.price;
-
-   return move>=atr;
-}
-
-//----------------------------------------------------
-
-void UpdateSwingEngine()
-{
-   FindLatestSwingHigh(
-      PERIOD_CURRENT,
-      LatestSwingHigh
-   );
-
-   FindLatestSwingLow(
-      PERIOD_CURRENT,
-      LatestSwingLow
-   );
-
-   LatestSwingHigh.strong =
-      IsStrongSwingHigh(
-         LatestSwingHigh
-      );
-
-   LatestSwingLow.strong =
-      IsStrongSwingLow(
-         LatestSwingLow
-      );
-}
-
-//----------------------------------------------------
-
-bool HigherHigh()
-{
-   if(!LatestSwingHigh.valid ||
-      !PreviousSwingHigh.valid)
-      return false;
-
-   return
-      LatestSwingHigh.price >
-      PreviousSwingHigh.price;
-}
-
-//----------------------------------------------------
-
-bool LowerLow()
-{
-   if(!LatestSwingLow.valid ||
-      !PreviousSwingLow.valid)
-      return false;
-
-   return
-      LatestSwingLow.price <
-      PreviousSwingLow.price;
-}
-
-//----------------------------------------------------
-
-bool HigherLow()
-{
-   if(!LatestSwingLow.valid ||
-      !PreviousSwingLow.valid)
-      return false;
-
-   return
-      LatestSwingLow.price >
-      PreviousSwingLow.price;
-}
-
-//----------------------------------------------------
-
-bool LowerHigh()
-{
-   if(!LatestSwingHigh.valid ||
-      !PreviousSwingHigh.valid)
-      return false;
-
-   return
-      LatestSwingHigh.price <
-      PreviousSwingHigh.price;
-}
-
-//----------------------------------------------------
-// Swing History Storage
+// Swing Parameters
 //----------------------------------------------------
 
 #define MAX_SWINGS 20
 
-SwingPoint SwingHighs[MAX_SWINGS];
-
-SwingPoint SwingLows[MAX_SWINGS];
-
-int SwingHighCount=0;
-
-int SwingLowCount=0;
-
+//----------------------------------------------------
+// Swing Structure
 //----------------------------------------------------
 
-void ResetSwingHistory()
+struct ICTSwing
 {
-   SwingHighCount=0;
+   bool valid;
 
-   SwingLowCount=0;
+   bool isHigh;
 
-   ArrayInitialize(SwingHighs,0);
+   bool major;
 
-   ArrayInitialize(SwingLows,0);
+   double price;
+
+   int barIndex;
+
+   datetime time;
+
+   double strength;
+};
+
+//----------------------------------------------------
+// Swing Database
+//----------------------------------------------------
+
+struct SwingDatabase
+{
+   ICTSwing Highs[MAX_SWINGS];
+
+   ICTSwing Lows[MAX_SWINGS];
+
+   int HighCount;
+
+   int LowCount;
+
+   datetime LastUpdate;
+};
+
+SwingDatabase SwingData[ACTIVE_SCAN_TIMEFRAMES];
+
+//----------------------------------------------------
+// Swing Settings
+//----------------------------------------------------
+
+input int SwingLeftBars=3;
+
+input int SwingRightBars=3;
+
+input double MinimumSwingATR=0.50;
+
+input bool DetectMajorSwings=true;
+
+//----------------------------------------------------
+// Find Swing Database
+//----------------------------------------------------
+
+int SwingIndex(
+   ENUM_TIMEFRAMES tf)
+{
+   return StructureIndex(tf);
 }
 
 //----------------------------------------------------
+// Reset Swing Database
+//----------------------------------------------------
 
-void AddSwingHigh(SwingPoint swing)
+void ResetSwingDatabase(
+   ENUM_TIMEFRAMES tf)
 {
-   if(!swing.valid)
+   int idx=
+      SwingIndex(tf);
+
+   if(idx<0)
       return;
 
-   if(SwingHighCount<MAX_SWINGS)
+   ZeroMemory(
+      SwingData[idx]);
+
+   SwingData[idx].HighCount=0;
+
+   SwingData[idx].LowCount=0;
+
+   SwingData[idx].LastUpdate=0;
+}
+
+//----------------------------------------------------
+// Initialize Swing Engine
+//----------------------------------------------------
+
+void InitializeSwingEngine()
+{
+   for(int i=0;
+      i<ACTIVE_SCAN_TIMEFRAMES;
+      i++)
    {
-      SwingHighs[SwingHighCount]=swing;
+      ResetSwingDatabase(
+         StructureTF[i]);
+   }
+}
 
-      SwingHighCount++;
+//----------------------------------------------------
+// Is Swing High
+//----------------------------------------------------
 
-      return;
+bool IsSwingHigh(
+   ENUM_TIMEFRAMES tf,
+   int bar)
+{
+   double candidate=
+      iHigh(_Symbol,tf,bar);
+
+   for(int i=1;i<=SwingLeftBars;i++)
+   {
+      if(iHigh(_Symbol,tf,bar+i)>=candidate)
+         return false;
    }
 
-   for(int i=0;i<MAX_SWINGS-1;i++)
-      SwingHighs[i]=SwingHighs[i+1];
-
-   SwingHighs[MAX_SWINGS-1]=swing;
-}
-
-//----------------------------------------------------
-
-void AddSwingLow(SwingPoint swing)
-{
-   if(!swing.valid)
-      return;
-
-   if(SwingLowCount<MAX_SWINGS)
+   for(int i=1;i<=SwingRightBars;i++)
    {
-      SwingLows[SwingLowCount]=swing;
-
-      SwingLowCount++;
-
-      return;
+      if(iHigh(_Symbol,tf,bar-i)>candidate)
+         return false;
    }
 
-   for(int i=0;i<MAX_SWINGS-1;i++)
-      SwingLows[i]=SwingLows[i+1];
-
-   SwingLows[MAX_SWINGS-1]=swing;
+   return true;
 }
 
-
+//----------------------------------------------------
+// Is Swing Low
 //----------------------------------------------------
 
-void RefreshSwingHistory()
+bool IsSwingLow(
+   ENUM_TIMEFRAMES tf,
+   int bar)
 {
-   SwingPoint swing;
+   double candidate=
+      iLow(_Symbol,tf,bar);
 
-   if(FindLatestSwingHigh(PERIOD_CURRENT,swing))
+   for(int i=1;i<=SwingLeftBars;i++)
    {
-      if(SwingHighCount==0 ||
-         SwingHighs[SwingHighCount-1].time!=swing.time)
+      if(iLow(_Symbol,tf,bar+i)<=candidate)
+         return false;
+   }
+
+   for(int i=1;i<=SwingRightBars;i++)
+   {
+      if(iLow(_Symbol,tf,bar-i)<candidate)
+         return false;
+   }
+
+   return true;
+}
+
+//----------------------------------------------------
+// Calculate Swing Strength
+//----------------------------------------------------
+
+double CalculateSwingStrength(
+   ENUM_TIMEFRAMES tf,
+   bool isHigh,
+   int bar)
+{
+   double atr=
+      GetATR(tf);
+
+   if(atr<=0)
+      return 0;
+
+   double range;
+
+   if(isHigh)
+      range=
+         iHigh(_Symbol,tf,bar)
+         -
+         iLow(_Symbol,tf,bar+SwingLeftBars);
+   else
+      range=
+         iHigh(_Symbol,tf,bar+SwingLeftBars)
+         -
+         iLow(_Symbol,tf,bar);
+
+   return
+      range/atr;
+}
+
+//----------------------------------------------------
+// Insert Swing High
+//----------------------------------------------------
+
+void InsertSwingHigh(
+   ENUM_TIMEFRAMES tf,
+   int bar)
+{
+   int idx=
+      SwingIndex(tf);
+
+   if(idx<0)
+      return;
+
+   for(int i=MAX_SWINGS-1;i>0;i--)
+      SwingData[idx].Highs[i]=
+      SwingData[idx].Highs[i-1];
+
+   SwingData[idx].Highs[0].valid=true;
+
+   SwingData[idx].Highs[0].isHigh=true;
+
+   SwingData[idx].Highs[0].price=
+      iHigh(_Symbol,tf,bar);
+
+   SwingData[idx].Highs[0].barIndex=
+      bar;
+
+   SwingData[idx].Highs[0].time=
+      iTime(_Symbol,tf,bar);
+
+   SwingData[idx].Highs[0].strength=
+      CalculateSwingStrength(
+         tf,
+         true,
+         bar);
+
+   SwingData[idx].Highs[0].major=
+      (SwingData[idx].Highs[0].strength
+      >=MinimumSwingATR);
+
+   if(SwingData[idx].HighCount
+      <MAX_SWINGS)
+      SwingData[idx].HighCount++;
+}
+
+//----------------------------------------------------
+// Insert Swing Low
+//----------------------------------------------------
+
+void InsertSwingLow(
+   ENUM_TIMEFRAMES tf,
+   int bar)
+{
+   int idx=
+      SwingIndex(tf);
+
+   if(idx<0)
+      return;
+
+   for(int i=MAX_SWINGS-1;i>0;i--)
+      SwingData[idx].Lows[i]=
+      SwingData[idx].Lows[i-1];
+
+   SwingData[idx].Lows[0].valid=true;
+
+   SwingData[idx].Lows[0].isHigh=false;
+
+   SwingData[idx].Lows[0].price=
+      iLow(_Symbol,tf,bar);
+
+   SwingData[idx].Lows[0].barIndex=
+      bar;
+
+   SwingData[idx].Lows[0].time=
+      iTime(_Symbol,tf,bar);
+
+   SwingData[idx].Lows[0].strength=
+      CalculateSwingStrength(
+         tf,
+         false,
+         bar);
+
+   SwingData[idx].Lows[0].major=
+      (SwingData[idx].Lows[0].strength
+      >=MinimumSwingATR);
+
+   if(SwingData[idx].LowCount
+      <MAX_SWINGS)
+      SwingData[idx].LowCount++;
+}
+
+//----------------------------------------------------
+// Scan Swings
+//----------------------------------------------------
+
+void ScanSwings(ENUM_TIMEFRAMES tf)
+{
+   int idx=SwingIndex(tf);
+
+   if(idx<0)
+      return;
+
+   int bars=iBars(_Symbol,tf);
+
+   if(bars<(SwingLeftBars+SwingRightBars+10))
+      return;
+
+   ResetSwingDatabase(tf);
+
+   for(int bar=bars-SwingRightBars-1;
+       bar>=SwingRightBars;
+       bar--)
+   {
+      if(IsSwingHigh(tf,bar))
+         InsertSwingHigh(tf,bar);
+
+      if(IsSwingLow(tf,bar))
+         InsertSwingLow(tf,bar);
+   }
+
+   SwingData[idx].LastUpdate=TimeCurrent();
+}
+
+//----------------------------------------------------
+// Latest Swing High
+//----------------------------------------------------
+
+ICTSwing LatestSwingHigh(
+   ENUM_TIMEFRAMES tf)
+{
+   ICTSwing empty={};
+
+   int idx=SwingIndex(tf);
+
+   if(idx<0)
+      return empty;
+
+   return SwingData[idx].Highs[0];
+}
+
+//----------------------------------------------------
+// Latest Swing Low
+//----------------------------------------------------
+
+ICTSwing LatestSwingLow(
+   ENUM_TIMEFRAMES tf)
+{
+   ICTSwing empty={};
+
+   int idx=SwingIndex(tf);
+
+   if(idx<0)
+      return empty;
+
+   return SwingData[idx].Lows[0];
+}
+
+//----------------------------------------------------
+// Previous Swing High
+//----------------------------------------------------
+
+ICTSwing PreviousSwingHigh(
+   ENUM_TIMEFRAMES tf)
+{
+   ICTSwing empty={};
+
+   int idx=SwingIndex(tf);
+
+   if(idx<0)
+      return empty;
+
+   if(SwingData[idx].HighCount<2)
+      return empty;
+
+   return SwingData[idx].Highs[1];
+}
+
+//----------------------------------------------------
+// Previous Swing Low
+//----------------------------------------------------
+
+ICTSwing PreviousSwingLow(
+   ENUM_TIMEFRAMES tf)
+{
+   ICTSwing empty={};
+
+   int idx=SwingIndex(tf);
+
+   if(idx<0)
+      return empty;
+
+   if(SwingData[idx].LowCount<2)
+      return empty;
+
+   return SwingData[idx].Lows[1];
+}
+
+//----------------------------------------------------
+// Latest Major Swing High
+//----------------------------------------------------
+
+ICTSwing LatestMajorSwingHigh(
+   ENUM_TIMEFRAMES tf)
+{
+   ICTSwing empty={};
+
+   int idx=SwingIndex(tf);
+
+   if(idx<0)
+      return empty;
+
+   for(int i=0;i<SwingData[idx].HighCount;i++)
+   {
+      if(SwingData[idx].Highs[i].valid &&
+         SwingData[idx].Highs[i].major)
       {
-         AddSwingHigh(swing);
+         return SwingData[idx].Highs[i];
       }
    }
 
-   if(FindLatestSwingLow(PERIOD_CURRENT,swing))
+   return empty;
+}
+
+//----------------------------------------------------
+// Latest Major Swing Low
+//----------------------------------------------------
+
+ICTSwing LatestMajorSwingLow(
+   ENUM_TIMEFRAMES tf)
+{
+   ICTSwing empty={};
+
+   int idx=SwingIndex(tf);
+
+   if(idx<0)
+      return empty;
+
+   for(int i=0;i<SwingData[idx].LowCount;i++)
    {
-      if(SwingLowCount==0 ||
-         SwingLows[SwingLowCount-1].time!=swing.time)
+      if(SwingData[idx].Lows[i].valid &&
+         SwingData[idx].Lows[i].major)
       {
-         AddSwingLow(swing);
+         return SwingData[idx].Lows[i];
       }
    }
+
+   return empty;
 }
+
 
 //----------------------------------------------------
-
-SwingPoint GetSwingHigh(int index)
-{
-   SwingPoint empty;
-
-   ZeroMemory(empty);
-
-   if(index<0 || index>=SwingHighCount)
-      return empty;
-
-   return SwingHighs[SwingHighCount-1-index];
-}
-
-//----------------------------------------------------
-
-SwingPoint GetSwingLow(int index)
-{
-   SwingPoint empty;
-
-   ZeroMemory(empty);
-
-   if(index<0 || index>=SwingLowCount)
-      return empty;
-
-   return SwingLows[SwingLowCount-1-index];
-}
-
+// Swing Engine Update
 //----------------------------------------------------
 
 void UpdateSwingEngine()
 {
-   RefreshSwingHistory();
-
-   if(SwingHighCount>=2)
+   for(int i=0;
+       i<ACTIVE_SCAN_TIMEFRAMES;
+       i++)
    {
-      LatestSwingHigh=
-         GetSwingHigh(0);
-
-      PreviousSwingHigh=
-         GetSwingHigh(1);
+      ScanSwings(
+         StructureTF[i]);
    }
-
-   if(SwingLowCount>=2)
-   {
-      LatestSwingLow=
-         GetSwingLow(0);
-
-      PreviousSwingLow=
-         GetSwingLow(1);
-   }
-
-   LatestSwingHigh.strong=
-      IsStrongSwingHigh(
-         LatestSwingHigh
-      );
-
-   LatestSwingLow.strong=
-      IsStrongSwingLow(
-         LatestSwingLow
-      );
 }
 
 
+      
 //====================================================
-// SECTION 13 - MARKET STRUCTURE ENGINE
+// SECTION 13 - PROFESSIONAL MARKET STRUCTURE ENGINE
 //====================================================
 
-enum ENUM_STRUCTURE
+//----------------------------------------------------
+// Market Structure State
+//----------------------------------------------------
+
+struct StructureAnalysis
 {
-   STRUCTURE_UNKNOWN = 0,
+   bool valid;
 
-   STRUCTURE_BULLISH,
+   ENUM_TIMEFRAMES timeframe;
 
-   STRUCTURE_BEARISH
+   ENUM_DIRECTION direction;
+
+   ENUM_STRUCTURE structure;
+
+   ICTSwing currentHigh;
+
+   ICTSwing previousHigh;
+
+   ICTSwing currentLow;
+
+   ICTSwing previousLow;
+
+   bool higherHigh;
+
+   bool higherLow;
+
+   bool lowerHigh;
+
+   bool lowerLow;
+
+   datetime lastUpdate;
 };
 
-enum ENUM_STRUCTURE_EVENT
-{
-   EVENT_NONE = 0,
-
-   EVENT_BOS,
-
-   EVENT_CHOCH,
-
-   EVENT_MSS
-};
+StructureAnalysis
+StructureAnalysisData[ACTIVE_SCAN_TIMEFRAMES];
 
 //----------------------------------------------------
-
-ENUM_STRUCTURE CurrentStructure =
-   STRUCTURE_UNKNOWN;
-
-ENUM_STRUCTURE_EVENT LastStructureEvent =
-   EVENT_NONE;
-
+// Reset Structure Analysis
 //----------------------------------------------------
 
-bool BullishBreakOfStructure()
+void ResetStructureAnalysis(
+   ENUM_TIMEFRAMES tf)
 {
-   if(SwingHighCount < 2)
-      return false;
+   int idx=
+      StructureIndex(tf);
 
-   double currentPrice =
-      SymbolInfoDouble(
-         _Symbol,
-         SYMBOL_BID
-      );
-
-   return
-      currentPrice >
-      LatestSwingHigh.price;
-}
-
-//----------------------------------------------------
-
-bool BearishBreakOfStructure()
-{
-   if(SwingLowCount < 2)
-      return false;
-
-   double currentPrice =
-      SymbolInfoDouble(
-         _Symbol,
-         SYMBOL_BID
-      );
-
-   return
-      currentPrice <
-      LatestSwingLow.price;
-}
-
-
-//----------------------------------------------------
-
-bool BullishCHOCH()
-{
-   if(CurrentStructure !=
-      STRUCTURE_BEARISH)
-      return false;
-
-   return
-      BullishBreakOfStructure();
-}
-
-//----------------------------------------------------
-
-bool BearishCHOCH()
-{
-   if(CurrentStructure !=
-      STRUCTURE_BULLISH)
-      return false;
-
-   return
-      BearishBreakOfStructure();
-}
-
-//----------------------------------------------------
-
-bool BullishMSS()
-{
-   if(!HigherHigh())
-      return false;
-
-   if(!HigherLow())
-      return false;
-
-   return
-      BullishBreakOfStructure();
-}
-
-//----------------------------------------------------
-
-bool BearishMSS()
-{
-   if(!LowerLow())
-      return false;
-
-   if(!LowerHigh())
-      return false;
-
-   return
-      BearishBreakOfStructure();
-}
-
-//----------------------------------------------------
-
-void UpdateMarketStructure()
-{
-   LastStructureEvent =
-      EVENT_NONE;
-
-   if(BullishMSS() &&
-      ConfirmedBullishBOS())
-   {
-      CurrentStructure =
-         STRUCTURE_BULLISH;
-
-      LastStructureEvent =
-         EVENT_MSS;
-
+   if(idx<0)
       return;
-   }
 
-   if(BearishMSS() &&
-      ConfirmedBearishBOS())
+   ZeroMemory(
+      StructureAnalysisData[idx]);
+
+   StructureAnalysisData[idx].timeframe=tf;
+}
+
+//----------------------------------------------------
+// Initialize Structure Engine
+//----------------------------------------------------
+
+void InitializeStructureEngine()
+{
+   for(int i=0;
+      i<ACTIVE_SCAN_TIMEFRAMES;
+      i++)
    {
-      CurrentStructure =
-         STRUCTURE_BEARISH;
-
-      LastStructureEvent =
-         EVENT_MSS;
-
-      return;
-   }
-
-   if(BullishCHOCH() &&
-      ConfirmedBullishBOS())
-   {
-      CurrentStructure =
-         STRUCTURE_BULLISH;
-
-      LastStructureEvent =
-         EVENT_CHOCH;
-
-      return;
-   }
-
-   if(BearishCHOCH() &&
-      ConfirmedBearishBOS())
-   {
-      CurrentStructure =
-         STRUCTURE_BEARISH;
-
-      LastStructureEvent =
-         EVENT_CHOCH;
-
-      return;
-   }
-
-   if(ConfirmedBullishBOS())
-   {
-      CurrentStructure =
-         STRUCTURE_BULLISH;
-
-      LastStructureEvent =
-         EVENT_BOS;
-
-      return;
-   }
-
-   if(ConfirmedBearishBOS())
-   {
-      CurrentStructure =
-         STRUCTURE_BEARISH;
-
-      LastStructureEvent =
-         EVENT_BOS;
-
-      return;
+      ResetStructureAnalysis(
+         StructureTF[i]);
    }
 }
 
 //----------------------------------------------------
+// Analyze Market Structure
+//----------------------------------------------------
 
-bool BullishStructure()
+void AnalyzeMarketStructure(
+   ENUM_TIMEFRAMES tf)
+{
+   int idx=
+      StructureIndex(tf);
+
+   if(idx<0)
+      return;
+
+   ICTSwing high0=
+      LatestSwingHigh(tf);
+
+   ICTSwing high1=
+      PreviousSwingHigh(tf);
+
+   ICTSwing low0=
+      LatestSwingLow(tf);
+
+   ICTSwing low1=
+      PreviousSwingLow(tf);
+
+   if(!high0.valid ||
+      !high1.valid ||
+      !low0.valid ||
+      !low1.valid)
+      return;
+
+   ResetStructureAnalysis(tf);
+
+   StructureAnalysisData[idx].valid=true;
+
+   StructureAnalysisData[idx].currentHigh=high0;
+   StructureAnalysisData[idx].previousHigh=high1;
+
+   StructureAnalysisData[idx].currentLow=low0;
+   StructureAnalysisData[idx].previousLow=low1;
+
+   StructureAnalysisData[idx].higherHigh=
+      (high0.price>high1.price);
+
+   StructureAnalysisData[idx].higherLow=
+      (low0.price>low1.price);
+
+   StructureAnalysisData[idx].lowerHigh=
+      (high0.price<high1.price);
+
+   StructureAnalysisData[idx].lowerLow=
+      (low0.price<low1.price);
+
+   //--------------------------------------
+   // Trend Direction
+   //--------------------------------------
+
+   if(
+      StructureAnalysisData[idx].higherHigh &&
+      StructureAnalysisData[idx].higherLow)
+   {
+      StructureAnalysisData[idx].direction=
+         DIRECTION_BULLISH;
+
+      StructureAnalysisData[idx].structure=
+         STRUCTURE_BOS;
+   }
+   else
+   if(
+      StructureAnalysisData[idx].lowerHigh &&
+      StructureAnalysisData[idx].lowerLow)
+   {
+      StructureAnalysisData[idx].direction=
+         DIRECTION_BEARISH;
+
+      StructureAnalysisData[idx].structure=
+         STRUCTURE_BOS;
+   }
+   else
+   {
+      StructureAnalysisData[idx].direction=
+         DIRECTION_NONE;
+
+      StructureAnalysisData[idx].structure=
+         STRUCTURE_NONE;
+   }
+
+   StructureAnalysisData[idx].lastUpdate=
+      TimeCurrent();
+}
+
+
+//----------------------------------------------------
+// Detect Market Structure
+//----------------------------------------------------
+
+void DetectMarketStructure(
+   ENUM_TIMEFRAMES tf)
+{
+   AnalyzeMarketStructure(tf);
+
+   int idx=
+      StructureIndex(tf);
+
+   if(idx<0)
+      return;
+
+   if(!StructureAnalysisData[idx].valid)
+      return;
+
+   bool bos=false;
+   bool mss=false;
+   bool choch=false;
+
+   ENUM_DIRECTION direction=
+      StructureAnalysisData[idx].direction;
+
+   ENUM_STRUCTURE structure=
+      StructureAnalysisData[idx].structure;
+
+   //---------------------------------------
+   // Bullish Structure
+   //---------------------------------------
+
+   if(direction==DIRECTION_BULLISH)
+   {
+      bos=true;
+
+      if(StructureDirection(tf)==
+         DIRECTION_BEARISH)
+      {
+         mss=true;
+         choch=true;
+      }
+   }
+
+   //---------------------------------------
+   // Bearish Structure
+   //---------------------------------------
+
+   if(direction==DIRECTION_BEARISH)
+   {
+      bos=true;
+
+      if(StructureDirection(tf)==
+         DIRECTION_BULLISH)
+      {
+         mss=true;
+         choch=true;
+      }
+   }
+
+   //---------------------------------------
+   // Save into Structure Matrix
+   //---------------------------------------
+
+   SaveStructureCache(
+      tf,
+      direction,
+      structure,
+
+      StructureAnalysisData[idx]
+         .currentHigh.price,
+
+      StructureAnalysisData[idx]
+         .currentLow.price,
+
+      StructureAnalysisData[idx]
+         .currentHigh.barIndex,
+
+      StructureAnalysisData[idx]
+         .currentLow.barIndex,
+
+      bos,
+      mss,
+      choch,
+      false
+   );
+}
+
+//----------------------------------------------------
+// Update Structure Engine
+//----------------------------------------------------
+
+void UpdateStructureEngine()
+{
+   for(int i=0;
+      i<ACTIVE_SCAN_TIMEFRAMES;
+      i++)
+   {
+      DetectMarketStructure(
+         StructureTF[i]);
+   }
+}
+
+//----------------------------------------------------
+// Structure Status
+//----------------------------------------------------
+
+bool BullishMarketStructure(
+   ENUM_TIMEFRAMES tf)
 {
    return
-      CurrentStructure ==
-      STRUCTURE_BULLISH;
+      StructureDirection(tf)
+      ==
+      DIRECTION_BULLISH;
 }
 
 //----------------------------------------------------
 
-bool BearishStructure()
+bool BearishMarketStructure(
+   ENUM_TIMEFRAMES tf)
 {
    return
-      CurrentStructure ==
-      STRUCTURE_BEARISH;
+      StructureDirection(tf)
+      ==
+      DIRECTION_BEARISH;
 }
 
 //----------------------------------------------------
 
-bool StructureBullishBias()
+bool MarketStructureReady(
+   ENUM_TIMEFRAMES tf)
 {
    return
-      BullishBias() &&
-      BullishStructure();
+      StructureReady(tf);
 }
 
-//----------------------------------------------------
 
-bool StructureBearishBias()
-{
-   return
-      BearishBias() &&
-      BearishStructure();
-}
 
-//----------------------------------------------------
 
-string StructureText()
-{
-   switch(CurrentStructure)
-   {
-      case STRUCTURE_BULLISH:
-
-         return "BULLISH";
-
-      case STRUCTURE_BEARISH:
-
-         return "BEARISH";
-
-      default:
-
-         return "UNKNOWN";
-   }
-}
-
-//----------------------------------------------------
-
-string StructureEventText()
-{
-   switch(LastStructureEvent)
-   {
-      case EVENT_BOS:
-
-         return "BOS";
-
-      case EVENT_CHOCH:
-
-         return "CHoCH";
-
-      case EVENT_MSS:
-
-         return "MSS";
-
-      default:
-
-         return "-";
-   }
-}
 
 
 
