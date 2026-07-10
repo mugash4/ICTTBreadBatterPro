@@ -2626,111 +2626,162 @@ bool MarketStructureReady(
 }
 
 
-
-
-
-
-
 //====================================================
-// SECTION 14 - CONFIRMED STRUCTURE BREAK ENGINE
+// SECTION 14 - INSTITUTIONAL BOS / MSS / CHOCH ENGINE
 //====================================================
 
-input bool EnableConfirmedBreaks = true;
-
-input double BreakCloseATR = 0.20;
-
-input double MinimumDisplacementATR = 1.20;
-
-input bool RequireMomentumConfirmation = true;
-
-input bool RequireBodyBreak = true;
-
+//----------------------------------------------------
+// BOS Settings
 //----------------------------------------------------
 
-double CandleBodySize(int shift)
+input double MinimumBodyPercent      = 60.0;
+input double MinimumBreakATR         = 0.50;
+
+input bool RequireBodyClose          = true;
+input bool RequireDisplacement       = true;
+
+//----------------------------------------------------
+// Structure Break
+//----------------------------------------------------
+
+struct StructureBreak
 {
-   return MathAbs(
-      iClose(_Symbol,PERIOD_CURRENT,shift) -
-      iOpen(_Symbol,PERIOD_CURRENT,shift)
-   );
+   bool valid;
+
+   bool confirmed;
+
+   bool BOS;
+
+   bool MSS;
+
+   bool CHOCH;
+
+   ENUM_DIRECTION direction;
+
+   ENUM_STRUCTURE structure;
+
+   double brokenLevel;
+
+   double closePrice;
+
+   double candleHigh;
+
+   double candleLow;
+
+   double bodySize;
+
+   double candleRange;
+
+   double bodyPercent;
+
+   double ATRExpansion;
+
+   int breakBar;
+
+   datetime breakTime;
+};
+
+StructureBreak
+StructureBreakData[ACTIVE_SCAN_TIMEFRAMES];
+
+//----------------------------------------------------
+// Reset Structure Break
+//----------------------------------------------------
+
+void ResetStructureBreak(
+   ENUM_TIMEFRAMES tf)
+{
+   int idx=
+      StructureIndex(tf);
+
+   if(idx<0)
+      return;
+
+   ZeroMemory(
+      StructureBreakData[idx]);
 }
 
 //----------------------------------------------------
+// Candle Body Percentage
+//----------------------------------------------------
 
-double CandleRange(int shift)
+double CandleBodyPercent(
+   ENUM_TIMEFRAMES tf,
+   int bar)
 {
+   double high=
+      iHigh(_Symbol,tf,bar);
+
+   double low=
+      iLow(_Symbol,tf,bar);
+
+   double open=
+      iOpen(_Symbol,tf,bar);
+
+   double close=
+      iClose(_Symbol,tf,bar);
+
+   double range=
+      high-low;
+
+   if(range<=0)
+      return 0;
+
+   double body=
+      MathAbs(close-open);
+
    return
-      iHigh(_Symbol,PERIOD_CURRENT,shift) -
-      iLow(_Symbol,PERIOD_CURRENT,shift);
+      (body/range)*100.0;
 }
 
 //----------------------------------------------------
+// ATR Expansion
+//----------------------------------------------------
 
-bool StrongBullishDisplacement()
+double ATRExpansion(
+   ENUM_TIMEFRAMES tf,
+   int bar)
 {
-   double atr = GetATR();
+   double atr=
+      GetATR(tf);
 
    if(atr<=0)
-      return false;
+      return 0;
 
-   if(!IsBullishCandle(1))
-      return false;
+   double range=
+      iHigh(_Symbol,tf,bar)
+      -
+      iLow(_Symbol,tf,bar);
 
    return
-      CandleBodySize(1) >=
-      atr * MinimumDisplacementATR;
+      range/atr;
 }
 
 //----------------------------------------------------
-
-bool StrongBearishDisplacement()
-{
-   double atr = GetATR();
-
-   if(atr<=0)
-      return false;
-
-   if(!IsBearishCandle(1))
-      return false;
-
-   return
-      CandleBodySize(1) >=
-      atr * MinimumDisplacementATR;
-}
-
+// Bullish BOS Filters
 //----------------------------------------------------
 
-bool BullishBreakConfirmed()
+bool BullishBreakFilters(
+   ENUM_TIMEFRAMES tf,
+   double level)
 {
-   if(!EnableConfirmedBreaks)
-      return BullishBreakOfStructure();
+   double close=
+      iClose(_Symbol,tf,1);
 
-   if(SwingHighCount<2)
+   if(close<=level)
       return false;
 
-   double atr = GetATR();
-
-   double close =
-      iClose(_Symbol,PERIOD_CURRENT,1);
-
-   if(close <
-      LatestSwingHigh.price +
-      atr*BreakCloseATR)
-      return false;
-
-   if(RequireBodyBreak)
+   if(RequireBodyClose)
    {
-      double open =
-         iOpen(_Symbol,PERIOD_CURRENT,1);
-
-      if(open >
-         LatestSwingHigh.price)
+      if(CandleBodyPercent(tf,1)
+         <MinimumBodyPercent)
          return false;
    }
 
-   if(RequireMomentumConfirmation)
+   if(RequireDisplacement)
    {
-      if(!StrongBullishDisplacement())
+      if(ATRExpansion(tf,1)
+         <MinimumBreakATR)
          return false;
    }
 
@@ -2738,38 +2789,30 @@ bool BullishBreakConfirmed()
 }
 
 //----------------------------------------------------
+// Bearish BOS Filters
+//----------------------------------------------------
 
-bool BearishBreakConfirmed()
+bool BearishBreakFilters(
+   ENUM_TIMEFRAMES tf,
+   double level)
 {
-   if(!EnableConfirmedBreaks)
-      return BearishBreakOfStructure();
+   double close=
+      iClose(_Symbol,tf,1);
 
-   if(SwingLowCount<2)
+   if(close>=level)
       return false;
 
-   double atr = GetATR();
-
-   double close =
-      iClose(_Symbol,PERIOD_CURRENT,1);
-
-   if(close >
-      LatestSwingLow.price -
-      atr*BreakCloseATR)
-      return false;
-
-   if(RequireBodyBreak)
+   if(RequireBodyClose)
    {
-      double open =
-         iOpen(_Symbol,PERIOD_CURRENT,1);
-
-      if(open <
-         LatestSwingLow.price)
+      if(CandleBodyPercent(tf,1)
+         <MinimumBodyPercent)
          return false;
    }
 
-   if(RequireMomentumConfirmation)
+   if(RequireDisplacement)
    {
-      if(!StrongBearishDisplacement())
+      if(ATRExpansion(tf,1)
+         <MinimumBreakATR)
          return false;
    }
 
@@ -2777,20 +2820,195 @@ bool BearishBreakConfirmed()
 }
 
 //----------------------------------------------------
+// Detect Structure Break
+//----------------------------------------------------
 
-bool ConfirmedBullishBOS()
+void DetectStructureBreak(
+   ENUM_TIMEFRAMES tf)
 {
-   return
-      BullishBreakConfirmed();
+   int idx=StructureIndex(tf);
+
+   if(idx<0)
+      return;
+
+   ResetStructureBreak(tf);
+
+   if(!StructureReady(tf))
+      return;
+
+   ENUM_DIRECTION previousDirection=
+      StructureDirection(tf);
+
+   ICTSwing latestHigh=
+      LatestSwingHigh(tf);
+
+   ICTSwing latestLow=
+      LatestSwingLow(tf);
+
+   //--------------------------------------------------
+   // Bullish Break
+   //--------------------------------------------------
+
+   if(BullishBreakFilters(
+      tf,
+      latestHigh.price))
+   {
+      StructureBreakData[idx].valid=true;
+
+      StructureBreakData[idx].confirmed=true;
+
+      StructureBreakData[idx].BOS=true;
+
+      StructureBreakData[idx].direction=
+         DIRECTION_BULLISH;
+
+      StructureBreakData[idx].structure=
+         STRUCTURE_BOS;
+
+      StructureBreakData[idx].brokenLevel=
+         latestHigh.price;
+   }
+
+   //--------------------------------------------------
+   // Bearish Break
+   //--------------------------------------------------
+
+   if(BearishBreakFilters(
+      tf,
+      latestLow.price))
+   {
+      StructureBreakData[idx].valid=true;
+
+      StructureBreakData[idx].confirmed=true;
+
+      StructureBreakData[idx].BOS=true;
+
+      StructureBreakData[idx].direction=
+         DIRECTION_BEARISH;
+
+      StructureBreakData[idx].structure=
+         STRUCTURE_BOS;
+
+      StructureBreakData[idx].brokenLevel=
+         latestLow.price;
+   }
+
+   //--------------------------------------------------
+   // MSS
+   //--------------------------------------------------
+
+   if(previousDirection==
+      DIRECTION_BEARISH &&
+      StructureBreakData[idx].direction==
+      DIRECTION_BULLISH)
+   {
+      StructureBreakData[idx].MSS=true;
+   }
+
+   if(previousDirection==
+      DIRECTION_BULLISH &&
+      StructureBreakData[idx].direction==
+      DIRECTION_BEARISH)
+   {
+      StructureBreakData[idx].MSS=true;
+   }
+
+   //--------------------------------------------------
+   // CHOCH
+   //--------------------------------------------------
+
+   if(StructureBreakData[idx].MSS)
+      StructureBreakData[idx].CHOCH=true;
+
+   //--------------------------------------------------
+
+   StructureBreakData[idx].breakBar=1;
+
+   StructureBreakData[idx].breakTime=
+      iTime(_Symbol,tf,1);
+
+   StructureBreakData[idx].closePrice=
+      iClose(_Symbol,tf,1);
+
+   StructureBreakData[idx].candleHigh=
+      iHigh(_Symbol,tf,1);
+
+   StructureBreakData[idx].candleLow=
+      iLow(_Symbol,tf,1);
+
+   StructureBreakData[idx].bodySize=
+      MathAbs(
+         iClose(_Symbol,tf,1)-
+         iOpen(_Symbol,tf,1));
+
+   StructureBreakData[idx].candleRange=
+      iHigh(_Symbol,tf,1)-
+      iLow(_Symbol,tf,1);
+
+   StructureBreakData[idx].bodyPercent=
+      CandleBodyPercent(tf,1);
+
+   StructureBreakData[idx].ATRExpansion=
+      ATRExpansion(tf,1);
+}
+
+//----------------------------------------------------
+// Update BOS Engine
+//----------------------------------------------------
+
+void UpdateStructureBreakEngine()
+{
+   for(int i=0;
+       i<ACTIVE_SCAN_TIMEFRAMES;
+       i++)
+   {
+      DetectStructureBreak(
+         StructureTF[i]);
+   }
+}
+
+//----------------------------------------------------
+// Helper Functions
+//----------------------------------------------------
+
+bool BOSConfirmed(
+   ENUM_TIMEFRAMES tf)
+{
+   int idx=StructureIndex(tf);
+
+   if(idx<0)
+      return false;
+
+   return StructureBreakData[idx].BOS;
 }
 
 //----------------------------------------------------
 
-bool ConfirmedBearishBOS()
+bool MSSConfirmed(
+   ENUM_TIMEFRAMES tf)
 {
-   return
-      BearishBreakConfirmed();
+   int idx=StructureIndex(tf);
+
+   if(idx<0)
+      return false;
+
+   return StructureBreakData[idx].MSS;
 }
+
+//----------------------------------------------------
+
+bool CHOCHConfirmed(
+   ENUM_TIMEFRAMES tf)
+{
+   int idx=StructureIndex(tf);
+
+   if(idx<0)
+      return false;
+
+   return StructureBreakData[idx].CHOCH;
+}
+
+
 
 
 //====================================================
