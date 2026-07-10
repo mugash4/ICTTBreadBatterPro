@@ -5923,6 +5923,601 @@ ENUM_DIRECTION PremiumDiscountDirection()
 
 
 
+//====================================================
+// SECTION 24 - ICT BREAD & BUTTER ENGINE
+//====================================================
+
+//----------------------------------------------------
+// Bread & Butter State
+//----------------------------------------------------
+
+enum ENUM_BNB_STATE
+{
+   BNB_WAIT_LIQUIDITY = 0,
+
+   BNB_WAIT_SWEEP,
+
+   BNB_WAIT_STRUCTURE,
+
+   BNB_WAIT_DISPLACEMENT,
+
+   BNB_WAIT_FVG,
+
+   BNB_WAIT_PREMIUM_DISCOUNT,
+
+   BNB_WAIT_RETRACEMENT,
+
+   BNB_READY,
+
+   BNB_EXECUTED,
+
+   BNB_INVALID
+};
+
+//----------------------------------------------------
+// Bread & Butter Setup
+//----------------------------------------------------
+
+struct BreadButterSetup
+{
+   bool valid;
+
+   ENUM_DIRECTION direction;
+
+   ENUM_BNB_STATE state;
+
+   ENUM_TIMEFRAMES timeframe;
+
+   double confidence;
+
+   double entry;
+
+   double stopLoss;
+
+   double takeProfit;
+
+   double riskReward;
+
+   datetime created;
+
+   datetime confirmed;
+
+   bool liquidityConfirmed;
+
+   bool sweepConfirmed;
+
+   bool structureConfirmed;
+
+   bool displacementConfirmed;
+
+   bool fvgConfirmed;
+
+   bool pdConfirmed;
+
+   bool retracementConfirmed;
+
+   bool executed;
+};
+
+BreadButterSetup BreadButter;
+
+//----------------------------------------------------
+// Inputs
+//----------------------------------------------------
+
+input bool EnableBreadButterEngine = true;
+
+input double MinimumBreadButterConfidence = 85.0;
+
+input int SetupTimeoutBars = 15;
+
+//----------------------------------------------------
+// Reset Setup
+//----------------------------------------------------
+
+void ResetBreadButter()
+{
+   ZeroMemory(BreadButter);
+
+   BreadButter.valid=false;
+
+   BreadButter.state=
+      BNB_WAIT_LIQUIDITY;
+}
+
+//----------------------------------------------------
+// Step 1
+//----------------------------------------------------
+
+bool BreadButterLiquidity()
+{
+   if(!HasValidLiquidity())
+      return false;
+
+   BreadButter.liquidityConfirmed=true;
+
+   BreadButter.direction=
+      LiquidityDirection();
+
+   BreadButter.state=
+      BNB_WAIT_SWEEP;
+
+   return true;
+}
+
+//----------------------------------------------------
+// Step 2
+//----------------------------------------------------
+
+bool BreadButterSweep()
+{
+   if(BreadButter.state!=BNB_WAIT_SWEEP)
+      return false;
+
+   if(CurrentLiquidity.swept==false)
+      return false;
+
+   BreadButter.sweepConfirmed=true;
+
+   BreadButter.state=
+      BNB_WAIT_STRUCTURE;
+
+   return true;
+}
+
+//----------------------------------------------------
+// Step 3
+//----------------------------------------------------
+
+bool BreadButterStructure()
+{
+   if(BreadButter.state!=
+      BNB_WAIT_STRUCTURE)
+      return false;
+
+   if(!StructureReady())
+      return false;
+
+   if(BreadButter.direction!=
+      StructureState.direction)
+      return false;
+
+   BreadButter.structureConfirmed=true;
+
+   BreadButter.state=
+      BNB_WAIT_DISPLACEMENT;
+
+   return true;
+}
+
+//----------------------------------------------------
+// Step 4
+//----------------------------------------------------
+
+bool BreadButterDisplacement()
+{
+   if(BreadButter.state!=BNB_WAIT_DISPLACEMENT)
+      return false;
+
+   // Existing Displacement Engine
+   if(!ValidDisplacement())
+      return false;
+
+   // Direction must agree
+   if(DisplacementDirection()!=
+      BreadButter.direction)
+      return false;
+
+   BreadButter.displacementConfirmed=true;
+
+   BreadButter.state=
+      BNB_WAIT_FVG;
+
+   return true;
+}
+
+//----------------------------------------------------
+// Step 5
+//----------------------------------------------------
+
+bool BreadButterFVG()
+{
+   if(BreadButter.state!=BNB_WAIT_FVG)
+      return false;
+
+   if(!CurrentFVG.valid)
+      return false;
+
+   //------------------------------------------------
+   // Bullish Setup
+   //------------------------------------------------
+
+   if(BreadButter.direction==
+      DIRECTION_BULLISH)
+   {
+      if(CurrentFVG.type!=
+         FVG_BULLISH)
+         return false;
+   }
+
+   //------------------------------------------------
+   // Bearish Setup
+   //------------------------------------------------
+
+   if(BreadButter.direction==
+      DIRECTION_BEARISH)
+   {
+      if(CurrentFVG.type!=
+         FVG_BEARISH)
+         return false;
+   }
+
+   BreadButter.fvgConfirmed=true;
+
+   BreadButter.state=
+      BNB_WAIT_PREMIUM_DISCOUNT;
+
+   return true;
+}
+
+//----------------------------------------------------
+// Step 6
+//----------------------------------------------------
+
+bool BreadButterPremiumDiscount()
+{
+   if(BreadButter.state!=
+      BNB_WAIT_PREMIUM_DISCOUNT)
+      return false;
+
+   //------------------------------------------------
+   // Bullish
+   //------------------------------------------------
+
+   if(BreadButter.direction==
+      DIRECTION_BULLISH)
+   {
+      if(!BullishPDFilter())
+         return false;
+   }
+
+   //------------------------------------------------
+   // Bearish
+   //------------------------------------------------
+
+   if(BreadButter.direction==
+      DIRECTION_BEARISH)
+   {
+      if(!BearishPDFilter())
+         return false;
+   }
+
+   BreadButter.pdConfirmed=true;
+
+   BreadButter.state=
+      BNB_WAIT_RETRACEMENT;
+
+   return true;
+}
+
+//----------------------------------------------------
+// Step 7
+//----------------------------------------------------
+
+bool BreadButterRetracement()
+{
+   if(BreadButter.state!=
+      BNB_WAIT_RETRACEMENT)
+      return false;
+
+   double bid=
+      SymbolInfoDouble(
+         _Symbol,
+         SYMBOL_BID);
+
+   //------------------------------------------------
+   // Bullish
+   //------------------------------------------------
+
+   if(BreadButter.direction==
+      DIRECTION_BULLISH)
+   {
+      if(bid>
+         CurrentFVG.high)
+         return false;
+   }
+
+   //------------------------------------------------
+   // Bearish
+   //------------------------------------------------
+
+   if(BreadButter.direction==
+      DIRECTION_BEARISH)
+   {
+      if(bid<
+         CurrentFVG.low)
+         return false;
+   }
+
+   BreadButter.retracementConfirmed=true;
+
+   BreadButter.state=
+      BNB_READY;
+
+   BreadButter.confirmed=
+      TimeCurrent();
+
+   return true;
+}
+
+//----------------------------------------------------
+// Bread & Butter Confidence
+//----------------------------------------------------
+
+void CalculateBreadButterConfidence()
+{
+   double score=0;
+
+   if(BreadButter.liquidityConfirmed)
+      score+=15;
+
+   if(BreadButter.sweepConfirmed)
+      score+=15;
+
+   if(BreadButter.structureConfirmed)
+      score+=20;
+
+   if(BreadButter.displacementConfirmed)
+      score+=15;
+
+   if(BreadButter.fvgConfirmed)
+      score+=15;
+
+   if(BreadButter.pdConfirmed)
+      score+=10;
+
+   if(BreadButter.retracementConfirmed)
+      score+=10;
+
+   BreadButter.confidence=
+      MathMin(score,100.0);
+
+   BreadButter.valid=
+      (BreadButter.confidence>=
+      MinimumBreadButterConfidence);
+}
+
+//----------------------------------------------------
+// Setup Creation Bar
+//----------------------------------------------------
+
+int BreadButterStartBar = -1;
+
+//----------------------------------------------------
+// Start Tracking Setup
+//----------------------------------------------------
+
+void StartBreadButterSetup()
+{
+   BreadButterStartBar =
+      iBars(_Symbol,PERIOD_CURRENT);
+}
+
+//----------------------------------------------------
+// Setup Age
+//----------------------------------------------------
+
+int BreadButterAge()
+{
+   if(BreadButterStartBar<0)
+      return 0;
+
+   return
+      BreadButterStartBar-
+      iBars(_Symbol,PERIOD_CURRENT);
+}
+
+//----------------------------------------------------
+// Setup Expired
+//----------------------------------------------------
+
+bool BreadButterExpired()
+{
+   int age=
+      MathAbs(
+         BreadButterAge());
+
+   return
+      age>=SetupTimeoutBars;
+}
+
+//----------------------------------------------------
+// Reset Entire Setup
+//----------------------------------------------------
+
+void InvalidateBreadButter()
+{
+   ResetBreadButter();
+
+   BreadButterStartBar=-1;
+}
+
+//----------------------------------------------------
+// Opposite Structure
+//----------------------------------------------------
+
+bool OppositeStructureDetected()
+{
+   if(!StructureReady())
+      return false;
+
+   if(BreadButter.direction==
+      DIRECTION_BULLISH &&
+      StructureState.direction==
+      DIRECTION_BEARISH)
+      return true;
+
+   if(BreadButter.direction==
+      DIRECTION_BEARISH &&
+      StructureState.direction==
+      DIRECTION_BULLISH)
+      return true;
+
+   return false;
+}
+
+//----------------------------------------------------
+// Opposite Liquidity Sweep
+//----------------------------------------------------
+
+bool OppositeLiquiditySweep()
+{
+   if(!CurrentLiquidity.valid)
+      return false;
+
+   if(BreadButter.direction==
+      DIRECTION_BULLISH &&
+      CurrentLiquidity.type==
+      LIQ_SWEEP_BUY)
+      return true;
+
+   if(BreadButter.direction==
+      DIRECTION_BEARISH &&
+      CurrentLiquidity.type==
+      LIQ_SWEEP_SELL)
+      return true;
+
+   return false;
+}
+
+//----------------------------------------------------
+// Prevent Reusing Same FVG
+//----------------------------------------------------
+
+datetime LastUsedFVGTime=0;
+
+bool FreshFVG()
+{
+   if(!CurrentFVG.valid)
+      return false;
+
+   if(CurrentFVG.created==
+      LastUsedFVGTime)
+      return false;
+
+   return true;
+}
+
+void LockCurrentFVG()
+{
+   LastUsedFVGTime=
+      CurrentFVG.created;
+}
+
+//----------------------------------------------------
+// Validate Existing Setup
+//----------------------------------------------------
+
+void ValidateBreadButterSetup()
+{
+   if(BreadButter.state==
+      BNB_WAIT_LIQUIDITY)
+      return;
+
+   //----------------------------------
+
+   if(BreadButterExpired())
+   {
+      InvalidateBreadButter();
+      return;
+   }
+
+   //----------------------------------
+
+   if(OppositeStructureDetected())
+   {
+      InvalidateBreadButter();
+      return;
+   }
+
+   //----------------------------------
+
+   if(OppositeLiquiditySweep())
+   {
+      InvalidateBreadButter();
+      return;
+   }
+
+   //----------------------------------
+
+   if(!FreshFVG())
+   {
+      InvalidateBreadButter();
+      return;
+   }
+}
+
+//----------------------------------------------------
+// Bread & Butter Engine
+//----------------------------------------------------
+
+void UpdateBreadButterEngine()
+{
+   if(!EnableBreadButterEngine)
+      return;
+
+   ValidateBreadButterSetup();
+
+   switch(BreadButter.state)
+   {
+      case BNB_WAIT_LIQUIDITY:
+
+         if(BreadButterLiquidity())
+            StartBreadButterSetup();
+
+         break;
+
+      case BNB_WAIT_SWEEP:
+
+         BreadButterSweep();
+         break;
+
+      case BNB_WAIT_STRUCTURE:
+
+         BreadButterStructure();
+         break;
+
+      case BNB_WAIT_DISPLACEMENT:
+
+         BreadButterDisplacement();
+         break;
+
+      case BNB_WAIT_FVG:
+
+         BreadButterFVG();
+         break;
+
+      case BNB_WAIT_PREMIUM_DISCOUNT:
+
+         BreadButterPremiumDiscount();
+         break;
+
+      case BNB_WAIT_RETRACEMENT:
+
+         BreadButterRetracement();
+         break;
+
+      default:
+         break;
+   }
+
+   CalculateBreadButterConfidence();
+}
+
+
+
+
+
 
 
 
