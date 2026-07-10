@@ -4569,21 +4569,22 @@ double StructureAgreementScore()
 }
 
 //====================================================
-// STRUCTURE CACHE
+// PROFESSIONAL MARKET STRUCTURE CACHE
 //====================================================
 
-struct StructureCache
+struct MarketStructureState
 {
    bool valid;
+
+   ENUM_TIMEFRAMES timeframe;
 
    ENUM_DIRECTION direction;
 
    ENUM_STRUCTURE structure;
 
-   ENUM_TIMEFRAMES timeframe;
-
-   double impulseHigh;
-   double impulseLow;
+   //----------------------------------------
+   // Confirmed Swings
+   //----------------------------------------
 
    double swingHigh;
    double swingLow;
@@ -4591,35 +4592,115 @@ struct StructureCache
    int swingHighIndex;
    int swingLowIndex;
 
+   datetime swingHighTime;
+   datetime swingLowTime;
+
+   //----------------------------------------
+   // Current Impulse
+   //----------------------------------------
+
+   double impulseHigh;
+   double impulseLow;
+
    datetime impulseStart;
 
    datetime impulseEnd;
 
    double impulseSize;
 
-   double impulseATR;
+   //----------------------------------------
+   // Structure Events
+   //----------------------------------------
+
+   bool BOS;
+
+   bool MSS;
+
+   bool CHOCH;
+
+   bool Displacement;
+
+   //----------------------------------------
+   // Trend
+   //----------------------------------------
+
+   bool bullish;
+
+   bool bearish;
+
+   //----------------------------------------
+   // Market Statistics
+   //----------------------------------------
+
+   double ATR;
+
+   double range;
+
+   double confidence;
+
+   //----------------------------------------
+   // State
+   //----------------------------------------
 
    bool newStructure;
+
+   datetime lastUpdate;
 };
 
-StructureCache StructureState;
+#define ACTIVE_SCAN_TIMEFRAMES 3
 
-//----------------------------------------------------
-// Reset Structure Cache
-//----------------------------------------------------
+MarketStructureState StructureState[ACTIVE_SCAN_TIMEFRAMES];
 
-void ResetStructureCache()
+ENUM_TIMEFRAMES StructureTF[ACTIVE_SCAN_TIMEFRAMES]=
 {
-   ZeroMemory(StructureState);
+   PERIOD_M5,
+   PERIOD_M15,
+   PERIOD_H1
+};
 
-   StructureState.valid=false;
+//====================================================
+// STRUCTURE CACHE FUNCTIONS
+//====================================================
+
+//--------------------------------------------------
+// Find timeframe index
+//--------------------------------------------------
+
+int StructureIndex(ENUM_TIMEFRAMES tf)
+{
+   for(int i=0;i<ACTIVE_SCAN_TIMEFRAMES;i++)
+   {
+      if(StructureTF[i]==tf)
+         return i;
+   }
+
+   return -1;
 }
 
-//----------------------------------------------------
-// Save Confirmed Structure
-//----------------------------------------------------
+//--------------------------------------------------
+// Reset Cache
+//--------------------------------------------------
+
+void ResetStructureCache(ENUM_TIMEFRAMES tf)
+{
+   int idx=StructureIndex(tf);
+
+   if(idx<0)
+      return;
+
+   ZeroMemory(StructureState[idx]);
+
+   StructureState[idx].timeframe=tf;
+
+   StructureState[idx].valid=false;
+}
+
+//--------------------------------------------------
+// Save Cache
+//--------------------------------------------------
 
 void SaveStructureCache(
+   ENUM_TIMEFRAMES tf,
    ENUM_DIRECTION direction,
    ENUM_STRUCTURE structure,
    double swingHigh,
@@ -4627,74 +4708,175 @@ void SaveStructureCache(
    int highIndex,
    int lowIndex)
 {
-   ResetStructureCache();
+   int idx=StructureIndex(tf);
 
-   StructureState.valid=true;
+   if(idx<0)
+      return;
 
-   StructureState.direction=direction;
+   ResetStructureCache(tf);
 
-   StructureState.structure=structure;
+   StructureState[idx].valid=true;
 
-   StructureState.timeframe=PERIOD_CURRENT;
+   StructureState[idx].direction=direction;
 
-   StructureState.swingHigh=swingHigh;
+   StructureState[idx].structure=structure;
 
-   StructureState.swingLow=swingLow;
+   StructureState[idx].timeframe=tf;
 
-   StructureState.impulseHigh=swingHigh;
+   StructureState[idx].swingHigh=swingHigh;
 
-   StructureState.impulseLow=swingLow;
+   StructureState[idx].swingLow=swingLow;
 
-   StructureState.swingHighIndex=highIndex;
+   StructureState[idx].swingHighIndex=highIndex;
 
-   StructureState.swingLowIndex=lowIndex;
+   StructureState[idx].swingLowIndex=lowIndex;
 
-   StructureState.impulseStart=
-      iTime(_Symbol,
-            PERIOD_CURRENT,
-            highIndex);
+   StructureState[idx].swingHighTime=
+      iTime(_Symbol,tf,highIndex);
 
-   StructureState.impulseEnd=
-      iTime(_Symbol,
-            PERIOD_CURRENT,
-            lowIndex);
+   StructureState[idx].swingLowTime=
+      iTime(_Symbol,tf,lowIndex);
 
-   StructureState.impulseSize=
-      MathAbs(
-         swingHigh-
-         swingLow);
+   StructureState[idx].impulseHigh=swingHigh;
 
-   StructureState.impulseATR=
-      GetATR();
+   StructureState[idx].impulseLow=swingLow;
 
-   StructureState.newStructure=true;
+   StructureState[idx].impulseStart=
+      iTime(_Symbol,tf,highIndex);
+
+   StructureState[idx].impulseEnd=
+      iTime(_Symbol,tf,lowIndex);
+
+   StructureState[idx].impulseSize=
+      MathAbs(swingHigh-swingLow);
+
+   StructureState[idx].ATR=
+      GetATR(tf);
+
+   StructureState[idx].range=
+      swingHigh-swingLow;
+
+   StructureState[idx].bullish=
+      (direction==DIRECTION_BULLISH);
+
+   StructureState[idx].bearish=
+      (direction==DIRECTION_BEARISH);
+
+   StructureState[idx].lastUpdate=
+      TimeCurrent();
+
+   StructureState[idx].newStructure=true;
 }
 
+//--------------------------------------------------
+// Structure Ready
+//--------------------------------------------------
 
-double CurrentImpulseHigh()
+bool StructureReady(ENUM_TIMEFRAMES tf)
 {
-   return StructureState.impulseHigh;
+   int idx=StructureIndex(tf);
+
+   if(idx<0)
+      return false;
+
+   return StructureState[idx].valid;
 }
 
-double CurrentImpulseLow()
+//--------------------------------------------------
+
+double CurrentSwingHigh(ENUM_TIMEFRAMES tf)
 {
-   return StructureState.impulseLow;
+   int idx=StructureIndex(tf);
+
+   if(idx<0)
+      return 0;
+
+   return StructureState[idx].swingHigh;
 }
 
-double CurrentSwingHigh()
+//--------------------------------------------------
+
+double CurrentSwingLow(ENUM_TIMEFRAMES tf)
 {
-   return StructureState.swingHigh;
+   int idx=StructureIndex(tf);
+
+   if(idx<0)
+      return 0;
+
+   return StructureState[idx].swingLow;
 }
 
-double CurrentSwingLow()
+//--------------------------------------------------
+
+double CurrentImpulseHigh(ENUM_TIMEFRAMES tf)
 {
-   return StructureState.swingLow;
+   int idx=StructureIndex(tf);
+
+   if(idx<0)
+      return 0;
+
+   return StructureState[idx].impulseHigh;
 }
 
+//--------------------------------------------------
 
-bool StructureReady()
+double CurrentImpulseLow(ENUM_TIMEFRAMES tf)
 {
-   return StructureState.valid;
+   int idx=StructureIndex(tf);
+
+   if(idx<0)
+      return 0;
+
+   return StructureState[idx].impulseLow;
+}
+
+//--------------------------------------------------
+
+ENUM_DIRECTION StructureDirection(ENUM_TIMEFRAMES tf)
+{
+   int idx=StructureIndex(tf);
+
+   if(idx<0)
+      return DIRECTION_NONE;
+
+   return StructureState[idx].direction;
+}
+
+//--------------------------------------------------
+
+ENUM_STRUCTURE CurrentStructure(ENUM_TIMEFRAMES tf)
+{
+   int idx=StructureIndex(tf);
+
+   if(idx<0)
+      return STRUCTURE_NONE;
+
+   return StructureState[idx].structure;
+}
+
+//--------------------------------------------------
+
+double StructureConfidence(ENUM_TIMEFRAMES tf)
+{
+   int idx=StructureIndex(tf);
+
+   if(idx<0)
+      return 0;
+
+   return StructureState[idx].confidence;
+}
+
+//--------------------------------------------------
+// Initialize Structure Cache
+//--------------------------------------------------
+
+void InitializeStructureCache()
+{
+   for(int i=0;i<ACTIVE_SCAN_TIMEFRAMES;i++)
+   {
+      ResetStructureCache(
+         StructureTF[i]);
+   }
 }
 
 
