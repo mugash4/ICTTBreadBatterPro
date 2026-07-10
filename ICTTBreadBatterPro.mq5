@@ -3844,231 +3844,339 @@ void UpdateFVGEngine()
 
 
 //====================================================
-// SECTION 17 - FAIR VALUE GAP DATABASE ENGINE
+// SECTION 17 - INSTITUTIONAL PREMIUM / DISCOUNT ENGINE
 //====================================================
 
-#define MAX_FVGS 50
-
-FairValueGap FVGDatabase[MAX_FVGS];
-
-int TotalFVGs = 0;
-
+//----------------------------------------------------
+// Inputs
 //----------------------------------------------------
 
-void ResetFVGDatabase()
-{
-   TotalFVGs = 0;
+input bool RequirePremiumDiscount = true;
 
-   for(int i=0; i<MAX_FVGS; i++)
-      ZeroMemory(FVGDatabase[i]);
-}
+input double EquilibriumTolerance = 2.0;
 
 //----------------------------------------------------
+// Premium Discount State
+//----------------------------------------------------
 
-void AddFVG(FairValueGap fvg)
+struct PremiumDiscountState
 {
-   if(!fvg.valid)
+   bool valid;
+
+   bool premium;
+
+   bool discount;
+
+   bool equilibrium;
+
+   ENUM_DIRECTION direction;
+
+   double swingHigh;
+
+   double swingLow;
+
+   double equilibriumPrice;
+
+   double currentPrice;
+
+   double distancePercent;
+};
+
+PremiumDiscountState
+PremiumDiscountData[ACTIVE_SCAN_TIMEFRAMES];
+         
+//----------------------------------------------------
+// Reset
+//----------------------------------------------------
+
+void ResetPremiumDiscount(
+   ENUM_TIMEFRAMES tf)
+{
+   int idx=
+      StructureIndex(tf);
+
+   if(idx<0)
       return;
 
-   if(TotalFVGs >= MAX_FVGS)
-   {
-      for(int i=1; i<MAX_FVGS; i++)
-         FVGDatabase[i-1] = FVGDatabase[i];
-
-      TotalFVGs = MAX_FVGS - 1;
-   }
-
-   FVGDatabase[TotalFVGs] = fvg;
-
-   TotalFVGs++;
-}
-
-
-//----------------------------------------------------
-
-void UpdateFVGTouches()
-{
-   double bid =
-      SymbolInfoDouble(
-         _Symbol,
-         SYMBOL_BID);
-
-   for(int i=0;i<TotalFVGs;i++)
-   {
-      if(!FVGDatabase[i].valid)
-         continue;
-
-      if(bid >= FVGDatabase[i].lowerPrice &&
-         bid <= FVGDatabase[i].upperPrice)
-      {
-         FVGDatabase[i].touches++;
-      }
-   }
+   ZeroMemory(
+      PremiumDiscountData[idx]);
 }
 
 //----------------------------------------------------
+// Equilibrium
+//----------------------------------------------------
 
-void UpdateMitigationStatus()
+double EquilibriumPrice(
+   double high,
+   double low)
 {
-   double bid =
-      SymbolInfoDouble(
-         _Symbol,
-         SYMBOL_BID);
+   return
+      (high+low)/2.0;
+}
 
-   for(int i=0;i<TotalFVGs;i++)
+//----------------------------------------------------
+// Position In Range
+//----------------------------------------------------
+
+double RangePercent(
+   double high,
+   double low,
+   double price)
+{
+   if(high<=low)
+      return 50.0;
+
+   return
+      ((price-low)/
+      (high-low))
+      *100.0;
+}
+
+//----------------------------------------------------
+// Detect Premium Discount
+//----------------------------------------------------
+
+void DetectPremiumDiscount(
+   ENUM_TIMEFRAMES tf)
+{
+   int idx=
+      StructureIndex(tf);
+
+   if(idx<0)
+      return;
+
+   ResetPremiumDiscount(tf);
+
+   if(!FVGData[idx].valid)
+      return;
+
+   double swingHigh=
+      LatestSwingHigh(tf).price;
+
+   double swingLow=
+      LatestSwingLow(tf).price;
+
+   double eq=
+      EquilibriumPrice(
+         swingHigh,
+         swingLow);
+
+   double price=
+      FVGData[idx].midpoint;
+
+   double percent=
+      RangePercent(
+         swingHigh,
+         swingLow,
+         price);
+
+   PremiumDiscountData[idx].valid=true;
+
+   PremiumDiscountData[idx].direction=
+      StructureDirection(tf);
+
+   PremiumDiscountData[idx].swingHigh=
+      swingHigh;
+
+   PremiumDiscountData[idx].swingLow=
+      swingLow;
+
+   PremiumDiscountData[idx].equilibriumPrice=
+      eq;
+
+   PremiumDiscountData[idx].currentPrice=
+      price;
+
+   PremiumDiscountData[idx].distancePercent=
+      percent;
+
+   //------------------------------------------
+   // Discount
+   //------------------------------------------
+
+   if(percent<50.0-
+      EquilibriumTolerance)
    {
-      if(!FVGDatabase[i].valid)
-         continue;
+      PremiumDiscountData[idx].discount=true;
+   }
 
-      if(FVGDatabase[i].direction ==
-         FVG_BULLISH)
-      {
-         if(bid <
-            FVGDatabase[i].lowerPrice)
-         {
-            FVGDatabase[i].mitigated = true;
-         }
-      }
+   //------------------------------------------
+   // Premium
+   //------------------------------------------
 
-      if(FVGDatabase[i].direction ==
-         FVG_BEARISH)
-      {
-         if(bid >
-            FVGDatabase[i].upperPrice)
-         {
-            FVGDatabase[i].mitigated = true;
-         }
-      }
+   if(percent>50.0+
+      EquilibriumTolerance)
+   {
+      PremiumDiscountData[idx].premium=true;
+   }
+
+   //------------------------------------------
+   // Equilibrium
+   //------------------------------------------
+
+   if(MathAbs(percent-50.0)
+      <=EquilibriumTolerance)
+   {
+      PremiumDiscountData[idx].equilibrium=true;
    }
 }
 
 //----------------------------------------------------
-
-void RemoveMitigatedFVGs()
-{
-   for(int i=0;i<TotalFVGs;)
-   {
-      if(FVGDatabase[i].mitigated)
-      {
-         for(int j=i+1;j<TotalFVGs;j++)
-            FVGDatabase[j-1] =
-               FVGDatabase[j];
-
-         TotalFVGs--;
-
-         continue;
-      }
-
-      i++;
-   }
-}
-
+// Premium Discount Validation
 //----------------------------------------------------
 
-int BestBullishFVG()
+bool PremiumDiscountValid(
+   ENUM_TIMEFRAMES tf)
 {
-   int index = -1;
+   int idx=
+      StructureIndex(tf);
 
-   double best = -1;
-
-   for(int i=0;i<TotalFVGs;i++)
-   {
-      if(!FVGDatabase[i].valid)
-         continue;
-
-      if(FVGDatabase[i].direction !=
-         FVG_BULLISH)
-         continue;
-
-      if(FVGDatabase[i].score > best)
-      {
-         best =
-            FVGDatabase[i].score;
-
-         index = i;
-      }
-   }
-
-   return index;
-}
-
-//----------------------------------------------------
-
-int BestBearishFVG()
-{
-   int index = -1;
-
-   double best = -1;
-
-   for(int i=0;i<TotalFVGs;i++)
-   {
-      if(!FVGDatabase[i].valid)
-         continue;
-
-      if(FVGDatabase[i].direction !=
-         FVG_BEARISH)
-         continue;
-
-      if(FVGDatabase[i].score > best)
-      {
-         best =
-            FVGDatabase[i].score;
-
-         index = i;
-      }
-   }
-
-   return index;
-}
-
-//----------------------------------------------------
-
-bool SelectBestBullishFVG()
-{
-   int idx =
-      BestBullishFVG();
-
-   if(idx < 0)
+   if(idx<0)
       return false;
 
-   CurrentFVG =
-      FVGDatabase[idx];
-
-   return true;
-}
-
-//----------------------------------------------------
-
-bool SelectBestBearishFVG()
-{
-   int idx =
-      BestBearishFVG();
-
-   if(idx < 0)
+   if(!PremiumDiscountData[idx].valid)
       return false;
 
-   CurrentFVG =
-      FVGDatabase[idx];
+   //------------------------------------------
+   // Bullish ICT
+   //------------------------------------------
 
-   return true;
+   if(StructureDirection(tf)==
+      DIRECTION_BULLISH)
+   {
+      return
+         PremiumDiscountData[idx].discount;
+   }
+
+   //------------------------------------------
+   // Bearish ICT
+   //------------------------------------------
+
+   if(StructureDirection(tf)==
+      DIRECTION_BEARISH)
+   {
+      return
+         PremiumDiscountData[idx].premium;
+   }
+
+   return false;
+}
+
+//----------------------------------------------------
+// Premium Discount Score
+//----------------------------------------------------
+
+double PremiumDiscountScore(
+   ENUM_TIMEFRAMES tf)
+{
+   int idx=
+      StructureIndex(tf);
+
+   if(idx<0)
+      return 0;
+
+   if(!PremiumDiscountData[idx].valid)
+      return 0;
+
+   double score=0.0;
+
+   double percent=
+      PremiumDiscountData[idx]
+      .distancePercent;
+
+   //------------------------------------------
+   // Bullish
+   //------------------------------------------
+
+   if(StructureDirection(tf)==
+      DIRECTION_BULLISH)
+   {
+      score=
+         100.0
+         -
+         percent;
+   }
+
+   //------------------------------------------
+   // Bearish
+   //------------------------------------------
+
+   else
+   {
+      score=
+         percent;
+   }
+
+   return
+      MathMax(
+      0.0,
+      MathMin(score,100.0));
+}
+
+//----------------------------------------------------
+// Update Premium Discount Engine
+//----------------------------------------------------
+
+void UpdatePremiumDiscountEngine()
+{
+   for(int i=0;
+       i<ACTIVE_SCAN_TIMEFRAMES;
+       i++)
+   {
+      DetectPremiumDiscount(
+         StructureTF[i]);
+   }
+}
+
+//----------------------------------------------------
+// Helper Functions
+//----------------------------------------------------
+
+bool InPremium(
+   ENUM_TIMEFRAMES tf)
+{
+   int idx=
+      StructureIndex(tf);
+
+   if(idx<0)
+      return false;
+
+   return
+      PremiumDiscountData[idx]
+      .premium;
 }
 
 //----------------------------------------------------
 
-void UpdateFVGDatabase()
+bool InDiscount(
+   ENUM_TIMEFRAMES tf)
 {
-   UpdateFVG();
+   int idx=
+      StructureIndex(tf);
 
-   if(CurrentFVG.valid)
-      AddFVG(CurrentFVG);
+   if(idx<0)
+      return false;
 
-   UpdateFVGTouches();
-
-   UpdateMitigationStatus();
-
-   RemoveMitigatedFVGs();
+   return
+      PremiumDiscountData[idx]
+      .discount;
 }
 
+//----------------------------------------------------
+
+bool InEquilibrium(
+   ENUM_TIMEFRAMES tf)
+{
+   int idx=
+      StructureIndex(tf);
+
+   if(idx<0)
+      return false;
+
+   return
+      PremiumDiscountData[idx]
+      .equilibrium;
+}
 
 
 
