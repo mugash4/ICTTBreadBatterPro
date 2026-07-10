@@ -3521,6 +3521,770 @@ void UpdateFVGDatabase()
 
 
 
+//====================================================
+// SECTION 18 - INSTITUTIONAL ORDER BLOCK ENGINE
+//====================================================
+
+enum ENUM_OB_DIRECTION
+{
+   OB_NONE = 0,
+
+   OB_BULLISH,
+
+   OB_BEARISH
+};
+
+struct OrderBlock
+{
+   bool valid;
+
+   ENUM_OB_DIRECTION direction;
+
+   double high;
+
+   double low;
+
+   double midpoint;
+
+   datetime created;
+
+   bool mitigated;
+
+   int touches;
+
+   double displacementScore;
+
+   double fvgScore;
+
+   double score;
+};
+
+OrderBlock CurrentOrderBlock;
+
+input bool EnableOrderBlockFilter = true;
+
+input int MinimumOrderBlockScore = 75;
+
+
+//----------------------------------------------------
+
+void ResetOrderBlock()
+{
+   ZeroMemory(CurrentOrderBlock);
+
+   CurrentOrderBlock.direction =
+      OB_NONE;
+}
+
+//----------------------------------------------------
+
+bool DetectBullishOrderBlock()
+{
+   ResetOrderBlock();
+
+   for(int i=2;i<=8;i++)
+   {
+      if(IsBearishCandle(i))
+      {
+         if(iClose(_Symbol,PERIOD_CURRENT,i-1)>
+            iHigh(_Symbol,PERIOD_CURRENT,i))
+         {
+            CurrentOrderBlock.valid=true;
+
+            CurrentOrderBlock.direction=
+               OB_BULLISH;
+
+            CurrentOrderBlock.high=
+               iHigh(_Symbol,PERIOD_CURRENT,i);
+
+            CurrentOrderBlock.low=
+               iLow(_Symbol,PERIOD_CURRENT,i);
+
+            CurrentOrderBlock.midpoint=
+               (CurrentOrderBlock.high+
+               CurrentOrderBlock.low)/2.0;
+
+            CurrentOrderBlock.created=
+               iTime(_Symbol,PERIOD_CURRENT,i);
+
+            return true;
+         }
+      }
+   }
+
+   return false;
+}
+
+//----------------------------------------------------
+
+bool DetectBearishOrderBlock()
+{
+   ResetOrderBlock();
+
+   for(int i=2;i<=8;i++)
+   {
+      if(IsBullishCandle(i))
+      {
+         if(iClose(_Symbol,PERIOD_CURRENT,i-1)<
+            iLow(_Symbol,PERIOD_CURRENT,i))
+         {
+            CurrentOrderBlock.valid=true;
+
+            CurrentOrderBlock.direction=
+               OB_BEARISH;
+
+            CurrentOrderBlock.high=
+               iHigh(_Symbol,PERIOD_CURRENT,i);
+
+            CurrentOrderBlock.low=
+               iLow(_Symbol,PERIOD_CURRENT,i);
+
+            CurrentOrderBlock.midpoint=
+               (CurrentOrderBlock.high+
+               CurrentOrderBlock.low)/2.0;
+
+            CurrentOrderBlock.created=
+               iTime(_Symbol,PERIOD_CURRENT,i);
+
+            return true;
+         }
+      }
+   }
+
+   return false;
+}
+
+//----------------------------------------------------
+
+double OrderBlockFreshnessScore()
+{
+   int bars=
+      iBarShift(
+         _Symbol,
+         PERIOD_CURRENT,
+         CurrentOrderBlock.created);
+
+   if(bars<=5)
+      return 25;
+
+   if(bars<=10)
+      return 20;
+
+   if(bars<=20)
+      return 15;
+
+   return 5;
+}
+
+//----------------------------------------------------
+
+double OrderBlockTouchScore()
+{
+   if(CurrentOrderBlock.touches==0)
+      return 20;
+
+   if(CurrentOrderBlock.touches==1)
+      return 15;
+
+   if(CurrentOrderBlock.touches==2)
+      return 10;
+
+   return 0;
+}
+
+
+//----------------------------------------------------
+
+double OrderBlockConfluenceScore()
+{
+   double score=0;
+
+   score+=CurrentDisplacementScore*0.25;
+
+   if(CurrentFVG.valid)
+      score+=20;
+
+   if(IsBullishLiquiditySweep()||
+      IsBearishLiquiditySweep())
+      score+=15;
+
+   return MathMin(score,40.0);
+}
+
+
+//----------------------------------------------------
+
+double CalculateOrderBlockScore()
+{
+   double score=0;
+
+   score+=OrderBlockFreshnessScore();
+
+   score+=OrderBlockTouchScore();
+
+   score+=OrderBlockConfluenceScore();
+
+   return MathMin(score,100.0);
+}
+
+
+//----------------------------------------------------
+
+void UpdateOrderBlock()
+{
+   ResetOrderBlock();
+
+   if(DetectBullishOrderBlock() ||
+      DetectBearishOrderBlock())
+   {
+      CurrentOrderBlock.displacementScore=
+         CurrentDisplacementScore;
+
+      CurrentOrderBlock.fvgScore=
+         CurrentFVG.score;
+
+      CurrentOrderBlock.score=
+         CalculateOrderBlockScore();
+   }
+}
+
+//----------------------------------------------------
+
+bool ValidBullishOrderBlock()
+{
+   return
+      CurrentOrderBlock.valid &&
+      CurrentOrderBlock.direction==
+      OB_BULLISH &&
+      CurrentOrderBlock.score>=
+      MinimumOrderBlockScore;
+}
+
+//----------------------------------------------------
+
+bool ValidBearishOrderBlock()
+{
+   return
+      CurrentOrderBlock.valid &&
+      CurrentOrderBlock.direction==
+      OB_BEARISH &&
+      CurrentOrderBlock.score>=
+      MinimumOrderBlockScore;
+}
+
+
+
+//====================================================
+// SECTION 19 - ORDER BLOCK DATABASE ENGINE
+//====================================================
+
+#define MAX_ORDERBLOCKS 100
+
+OrderBlock OrderBlockDatabase[MAX_ORDERBLOCKS];
+
+int TotalOrderBlocks = 0;
+
+//----------------------------------------------------
+
+void ResetOrderBlockDatabase()
+{
+   TotalOrderBlocks = 0;
+
+   for(int i=0;i<MAX_ORDERBLOCKS;i++)
+      ZeroMemory(OrderBlockDatabase[i]);
+}
+
+//----------------------------------------------------
+
+void AddOrderBlock(OrderBlock ob)
+{
+   if(!ob.valid)
+      return;
+
+   if(TotalOrderBlocks >= MAX_ORDERBLOCKS)
+   {
+      for(int i=1;i<MAX_ORDERBLOCKS;i++)
+         OrderBlockDatabase[i-1] =
+            OrderBlockDatabase[i];
+
+      TotalOrderBlocks =
+         MAX_ORDERBLOCKS-1;
+   }
+
+   OrderBlockDatabase[TotalOrderBlocks] = ob;
+
+   TotalOrderBlocks++;
+}
+
+//----------------------------------------------------
+
+void UpdateOrderBlockTouches()
+{
+   double bid =
+      SymbolInfoDouble(
+         _Symbol,
+         SYMBOL_BID);
+
+   for(int i=0;i<TotalOrderBlocks;i++)
+   {
+      if(!OrderBlockDatabase[i].valid)
+         continue;
+
+      if(bid >= OrderBlockDatabase[i].low &&
+         bid <= OrderBlockDatabase[i].high)
+      {
+         OrderBlockDatabase[i].touches++;
+      }
+   }
+}
+
+//----------------------------------------------------
+
+void UpdateOrderBlockMitigation()
+{
+   double bid =
+      SymbolInfoDouble(
+         _Symbol,
+         SYMBOL_BID);
+
+   for(int i=0;i<TotalOrderBlocks;i++)
+   {
+      if(!OrderBlockDatabase[i].valid)
+         continue;
+
+      if(OrderBlockDatabase[i].direction ==
+         OB_BULLISH)
+      {
+         if(bid <
+            OrderBlockDatabase[i].low)
+         {
+            OrderBlockDatabase[i].mitigated = true;
+         }
+      }
+
+      if(OrderBlockDatabase[i].direction ==
+         OB_BEARISH)
+      {
+         if(bid >
+            OrderBlockDatabase[i].high)
+         {
+            OrderBlockDatabase[i].mitigated = true;
+         }
+      }
+   }
+}
+
+//----------------------------------------------------
+
+void RemoveMitigatedOrderBlocks()
+{
+   for(int i=0;i<TotalOrderBlocks;)
+   {
+      if(OrderBlockDatabase[i].mitigated)
+      {
+         for(int j=i+1;j<TotalOrderBlocks;j++)
+            OrderBlockDatabase[j-1] =
+               OrderBlockDatabase[j];
+
+         TotalOrderBlocks--;
+
+         continue;
+      }
+
+      i++;
+   }
+}
+
+//----------------------------------------------------
+
+int BestBullishOrderBlock()
+{
+   int index = -1;
+
+   double bestScore = -1;
+
+   for(int i=0;i<TotalOrderBlocks;i++)
+   {
+      if(!OrderBlockDatabase[i].valid)
+         continue;
+
+      if(OrderBlockDatabase[i].direction !=
+         OB_BULLISH)
+         continue;
+
+      if(OrderBlockDatabase[i].score >
+         bestScore)
+      {
+         bestScore =
+            OrderBlockDatabase[i].score;
+
+         index = i;
+      }
+   }
+
+   return index;
+}
+
+//----------------------------------------------------
+
+int BestBearishOrderBlock()
+{
+   int index = -1;
+
+   double bestScore = -1;
+
+   for(int i=0;i<TotalOrderBlocks;i++)
+   {
+      if(!OrderBlockDatabase[i].valid)
+         continue;
+
+      if(OrderBlockDatabase[i].direction !=
+         OB_BEARISH)
+         continue;
+
+      if(OrderBlockDatabase[i].score >
+         bestScore)
+      {
+         bestScore =
+            OrderBlockDatabase[i].score;
+
+         index = i;
+      }
+   }
+
+   return index;
+}
+
+//----------------------------------------------------
+
+bool SelectBestBullishOrderBlock()
+{
+   int idx =
+      BestBullishOrderBlock();
+
+   if(idx < 0)
+      return false;
+
+   CurrentOrderBlock =
+      OrderBlockDatabase[idx];
+
+   return true;
+}
+
+//----------------------------------------------------
+
+bool SelectBestBearishOrderBlock()
+{
+   int idx =
+      BestBearishOrderBlock();
+
+   if(idx < 0)
+      return false;
+
+   CurrentOrderBlock =
+      OrderBlockDatabase[idx];
+
+   return true;
+}
+
+//----------------------------------------------------
+
+void UpdateOrderBlockDatabase()
+{
+   UpdateOrderBlock();
+
+   if(CurrentOrderBlock.valid)
+      AddOrderBlock(CurrentOrderBlock);
+
+   UpdateOrderBlockTouches();
+
+   UpdateOrderBlockMitigation();
+
+   RemoveMitigatedOrderBlocks();
+}
+
+
+//====================================================
+// SECTION 20 - MARKET STRUCTURE ENGINE
+//====================================================
+
+enum ENUM_STRUCTURE_EVENT
+{
+   STRUCTURE_NONE = 0,
+
+   STRUCTURE_BOS,
+
+   STRUCTURE_MSS,
+
+   STRUCTURE_CHOCH
+};
+
+struct MarketStructure
+{
+   bool valid;
+
+   ENUM_STRUCTURE_EVENT event;
+
+   ENUM_TREND direction;
+
+   double breakPrice;
+
+   datetime breakTime;
+
+   double score;
+
+   bool displacementConfirmed;
+
+   bool liquidityConfirmed;
+};
+
+MarketStructure CurrentStructure;
+
+input bool EnableStructureFilter = true;
+
+input int MinimumStructureScore = 75;
+
+//----------------------------------------------------
+
+void ResetStructure()
+{
+   ZeroMemory(CurrentStructure);
+
+   CurrentStructure.event =
+      STRUCTURE_NONE;
+
+   CurrentStructure.direction =
+      TREND_NONE;
+}
+
+//----------------------------------------------------
+
+bool DetectBullishBOS()
+{
+   SwingPoint latestHigh;
+
+   if(!GetLatestSwingHigh(latestHigh))
+      return false;
+
+   double close =
+      iClose(_Symbol,
+             PERIOD_CURRENT,
+             1);
+
+   if(close <= latestHigh.price)
+      return false;
+
+   CurrentStructure.valid = true;
+
+   CurrentStructure.event =
+      STRUCTURE_BOS;
+
+   CurrentStructure.direction =
+      TREND_UP;
+
+   CurrentStructure.breakPrice =
+      latestHigh.price;
+
+   CurrentStructure.breakTime =
+      TimeCurrent();
+
+   return true;
+}
+
+//----------------------------------------------------
+
+bool DetectBearishBOS()
+{
+   SwingPoint latestLow;
+
+   if(!GetLatestSwingLow(latestLow))
+      return false;
+
+   double close =
+      iClose(_Symbol,
+             PERIOD_CURRENT,
+             1);
+
+   if(close >= latestLow.price)
+      return false;
+
+   CurrentStructure.valid = true;
+
+   CurrentStructure.event =
+      STRUCTURE_BOS;
+
+   CurrentStructure.direction =
+      TREND_DOWN;
+
+   CurrentStructure.breakPrice =
+      latestLow.price;
+
+   CurrentStructure.breakTime =
+      TimeCurrent();
+
+   return true;
+}
+
+//----------------------------------------------------
+
+bool DetectBullishMSS()
+{
+   if(CurrentTrend != TREND_DOWN)
+      return false;
+
+   if(!DetectBullishBOS())
+      return false;
+
+   CurrentStructure.event =
+      STRUCTURE_MSS;
+
+   return true;
+}
+
+//----------------------------------------------------
+
+bool DetectBearishMSS()
+{
+   if(CurrentTrend != TREND_UP)
+      return false;
+
+   if(!DetectBearishBOS())
+      return false;
+
+   CurrentStructure.event =
+      STRUCTURE_MSS;
+
+   return true;
+}
+
+//----------------------------------------------------
+
+bool DetectBullishCHoCH()
+{
+   if(!DetectBullishMSS())
+      return false;
+
+   CurrentStructure.event =
+      STRUCTURE_CHOCH;
+
+   return true;
+}
+
+//----------------------------------------------------
+
+bool DetectBearishCHoCH()
+{
+   if(!DetectBearishMSS())
+      return false;
+
+   CurrentStructure.event =
+      STRUCTURE_CHOCH;
+
+   return true;
+}
+
+//----------------------------------------------------
+
+double StructureDisplacementScore()
+{
+   if(CurrentDisplacementScore >= 90)
+      return 35;
+
+   if(CurrentDisplacementScore >= 80)
+      return 30;
+
+   if(CurrentDisplacementScore >= 70)
+      return 25;
+
+   if(CurrentDisplacementScore >= 60)
+      return 15;
+
+   return 0;
+}
+
+//----------------------------------------------------
+
+double StructureLiquidityScore()
+{
+   if(IsBullishLiquiditySweep() ||
+      IsBearishLiquiditySweep())
+      return 30;
+
+   return 0;
+}
+
+//----------------------------------------------------
+
+double StructureTrendScore()
+{
+   if(CurrentTrendStrength >= 80)
+      return 35;
+
+   if(CurrentTrendStrength >= 70)
+      return 25;
+
+   if(CurrentTrendStrength >= 60)
+      return 15;
+
+   return 0;
+}
+
+//----------------------------------------------------
+
+double CalculateStructureScore()
+{
+   double score = 0;
+
+   score += StructureDisplacementScore();
+
+   score += StructureLiquidityScore();
+
+   score += StructureTrendScore();
+
+   return MathMin(score,100.0);
+}
+
+//----------------------------------------------------
+
+void UpdateMarketStructure()
+{
+   ResetStructure();
+
+   DetectBullishCHoCH();
+
+   DetectBearishCHoCH();
+
+   DetectBullishBOS();
+
+   DetectBearishBOS();
+
+   if(CurrentStructure.valid)
+   {
+      CurrentStructure.score =
+         CalculateStructureScore();
+
+      CurrentStructure.displacementConfirmed =
+         (CurrentDisplacementScore >= 70);
+
+      CurrentStructure.liquidityConfirmed =
+         (IsBullishLiquiditySweep() ||
+          IsBearishLiquiditySweep());
+   }
+}
+
+//----------------------------------------------------
+
+bool ValidStructure()
+{
+   if(!CurrentStructure.valid)
+      return false;
+
+   if(CurrentStructure.score <
+      MinimumStructureScore)
+      return false;
+
+   return true;
+}
 
 
 
