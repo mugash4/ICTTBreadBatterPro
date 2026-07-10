@@ -3366,267 +3366,385 @@ int CurrentImpulseCandles(
 // SECTION 16 - INSTITUTIONAL FAIR VALUE GAP ENGINE
 //====================================================
 
-enum ENUM_FVG_DIRECTION
-{
-   FVG_NONE = 0,
-
-   FVG_BULLISH,
-
-   FVG_BEARISH
-};
+//----------------------------------------------------
+// Institutional Fair Value Gap
+//----------------------------------------------------
 
 struct FairValueGap
 {
    bool valid;
 
-   ENUM_FVG_DIRECTION direction;
+   bool confirmed;
 
-   double upperPrice;
+   ENUM_FVG_TYPE type;
 
-   double lowerPrice;
+   ENUM_DIRECTION direction;
+
+   double high;
+
+   double low;
 
    double midpoint;
 
    double size;
 
-   datetime created;
+   double filledPercent;
+
+   double score;
+
+   int creationBar;
+
+   int displacementBar;
+
+   datetime creationTime;
 
    bool mitigated;
 
-   int touches;
+   bool invalidated;
 
-   double score;
+   int touchCount;
 };
 
-FairValueGap CurrentFVG;
-
+//----------------------------------------------------
+// FVG State
 //----------------------------------------------------
 
-input bool EnableFVGFilter = true;
-
-input int MinimumFVGScore = 70;
+FairValueGap
+FVGData[ACTIVE_SCAN_TIMEFRAMES];
 
 //----------------------------------------------------
+// FVG Settings
+//----------------------------------------------------
 
-void ResetFVG()
+input double MinimumFVGSizeATR = 0.20;
+
+input double MaximumFillPercent = 50.0;
+
+input bool RequireDisplacementFVG = true;
+
+input bool IgnoreTinyFVG = true;
+
+//----------------------------------------------------
+// Reset FVG
+//----------------------------------------------------
+
+void ResetFVG(
+   ENUM_TIMEFRAMES tf)
 {
-   ZeroMemory(CurrentFVG);
+   int idx=
+      StructureIndex(tf);
 
-   CurrentFVG.direction = FVG_NONE;
+   if(idx<0)
+      return;
+
+   ZeroMemory(
+      FVGData[idx]);
 }
 
 //----------------------------------------------------
-
-bool DetectBullishFVG()
-{
-   ResetFVG();
-
-   double high1 =
-      iHigh(_Symbol,PERIOD_CURRENT,3);
-
-   double low3 =
-      iLow(_Symbol,PERIOD_CURRENT,1);
-
-   if(low3<=high1)
-      return false;
-
-   CurrentFVG.valid=true;
-
-   CurrentFVG.direction=
-      FVG_BULLISH;
-
-   CurrentFVG.upperPrice=
-      low3;
-
-   CurrentFVG.lowerPrice=
-      high1;
-
-   CurrentFVG.midpoint=
-      (low3+high1)/2.0;
-
-   CurrentFVG.size=
-      low3-high1;
-
-   CurrentFVG.created=
-      iTime(_Symbol,PERIOD_CURRENT,1);
-
-   return true;
-}
-
+// FVG Size Filter
 //----------------------------------------------------
 
-bool DetectBearishFVG()
-{
-   ResetFVG();
-
-   double low1 =
-      iLow(_Symbol,PERIOD_CURRENT,3);
-
-   double high3 =
-      iHigh(_Symbol,PERIOD_CURRENT,1);
-
-   if(high3>=low1)
-      return false;
-
-   CurrentFVG.valid=true;
-
-   CurrentFVG.direction=
-      FVG_BEARISH;
-
-   CurrentFVG.upperPrice=
-      low1;
-
-   CurrentFVG.lowerPrice=
-      high3;
-
-   CurrentFVG.midpoint=
-      (low1+high3)/2.0;
-
-   CurrentFVG.size=
-      low1-high3;
-
-   CurrentFVG.created=
-      iTime(_Symbol,PERIOD_CURRENT,1);
-
-   return true;
-}
-
-//----------------------------------------------------
-
-double FVGSizeScore()
+bool ValidFVGSize(
+   ENUM_TIMEFRAMES tf,
+   double high,
+   double low)
 {
    double atr=
-      GetATR();
+      GetATR(tf);
 
    if(atr<=0)
-      return 0;
+      return false;
 
-   double ratio=
-      CurrentFVG.size/atr;
+   double gap=
+      MathAbs(high-low);
 
-   if(ratio>=1.50)
-      return 30;
-
-   if(ratio>=1.20)
-      return 25;
-
-   if(ratio>=1.00)
-      return 20;
-
-   if(ratio>=0.70)
-      return 15;
-
-   return 5;
+   return
+      gap
+      >=
+      atr*
+      MinimumFVGSizeATR;
 }
 
 //----------------------------------------------------
-
-double FVGDisplacementScore()
-{
-   if(CurrentDisplacementScore>=90)
-      return 25;
-
-   if(CurrentDisplacementScore>=80)
-      return 20;
-
-   if(CurrentDisplacementScore>=70)
-      return 15;
-
-   return 0;
-}
-
+// Bullish FVG
 //----------------------------------------------------
 
-double FVGFreshnessScore()
+bool BullishFVG(
+   ENUM_TIMEFRAMES tf,
+   int bar,
+   double &high,
+   double &low)
 {
-   int bars=
-      iBarShift(
-         _Symbol,
-         PERIOD_CURRENT,
-         CurrentFVG.created
-      );
+   double candle1High=
+      iHigh(_Symbol,tf,bar+2);
 
-   if(bars<=3)
-      return 20;
+   double candle3Low=
+      iLow(_Symbol,tf,bar);
 
-   if(bars<=8)
-      return 15;
+   if(candle3Low<=candle1High)
+      return false;
 
-   if(bars<=15)
-      return 10;
+   high=candle3Low;
+   low=candle1High;
 
-   return 5;
-}
-
-//----------------------------------------------------
-
-double FVGMitigationScore()
-{
-   if(CurrentFVG.touches==0)
-      return 15;
-
-   if(CurrentFVG.touches==1)
-      return 10;
-
-   if(CurrentFVG.touches==2)
-      return 5;
-
-   return 0;
-}
-
-//----------------------------------------------------
-
-double CalculateFVGScore()
-{
-   double score=0;
-
-   score+=FVGSizeScore();
-
-   score+=FVGDisplacementScore();
-
-   score+=FVGFreshnessScore();
-
-   score+=FVGMitigationScore();
-
-   return MathMin(score,100.0);
-}
-
-//----------------------------------------------------
-
-void UpdateFVG()
-{
-   ResetFVG();
-
-   if(DetectBullishFVG() ||
-      DetectBearishFVG())
+   if(IgnoreTinyFVG)
    {
-      CurrentFVG.score=
-         CalculateFVGScore();
+      if(!ValidFVGSize(tf,high,low))
+         return false;
+   }
+
+   return true;
+}
+
+//----------------------------------------------------
+// Bearish FVG
+//----------------------------------------------------
+
+bool BearishFVG(
+   ENUM_TIMEFRAMES tf,
+   int bar,
+   double &high,
+   double &low)
+{
+   double candle1Low=
+      iLow(_Symbol,tf,bar+2);
+
+   double candle3High=
+      iHigh(_Symbol,tf,bar);
+
+   if(candle3High>=candle1Low)
+      return false;
+
+   high=candle1Low;
+   low=candle3High;
+
+   if(IgnoreTinyFVG)
+   {
+      if(!ValidFVGSize(tf,high,low))
+         return false;
+   }
+
+   return true;
+}
+
+//----------------------------------------------------
+// Detect FVG From Displacement
+//----------------------------------------------------
+
+bool DetectDisplacementFVG(
+   ENUM_TIMEFRAMES tf)
+{
+   int idx=StructureIndex(tf);
+
+   if(idx<0)
+      return false;
+
+   ResetFVG(tf);
+
+   //------------------------------------------
+   // Must have confirmed displacement
+   //------------------------------------------
+
+   if(!DisplacementConfirmed(tf))
+      return false;
+
+   double high,low;
+
+   //------------------------------------------
+   // Search around displacement candle
+   //------------------------------------------
+
+   for(int bar=1; bar<=5; bar++)
+   {
+      //--------------------------------------
+      // Bullish
+      //--------------------------------------
+
+      if(StructureDirection(tf)==DIRECTION_BULLISH)
+      {
+         if(BullishFVG(tf,bar,high,low))
+         {
+            FVGData[idx].valid=true;
+            FVGData[idx].confirmed=true;
+
+            FVGData[idx].type=FVG_BULLISH;
+            FVGData[idx].direction=DIRECTION_BULLISH;
+
+            FVGData[idx].high=high;
+            FVGData[idx].low=low;
+
+            FVGData[idx].midpoint=
+               (high+low)/2.0;
+
+            FVGData[idx].size=
+               MathAbs(high-low);
+
+            FVGData[idx].creationBar=bar;
+
+            FVGData[idx].displacementBar=1;
+
+            FVGData[idx].creationTime=
+               iTime(_Symbol,tf,bar);
+
+            return true;
+         }
+      }
+
+      //--------------------------------------
+      // Bearish
+      //--------------------------------------
+
+      if(StructureDirection(tf)==DIRECTION_BEARISH)
+      {
+         if(BearishFVG(tf,bar,high,low))
+         {
+            FVGData[idx].valid=true;
+            FVGData[idx].confirmed=true;
+
+            FVGData[idx].type=FVG_BEARISH;
+            FVGData[idx].direction=DIRECTION_BEARISH;
+
+            FVGData[idx].high=high;
+            FVGData[idx].low=low;
+
+            FVGData[idx].midpoint=
+               (high+low)/2.0;
+
+            FVGData[idx].size=
+               MathAbs(high-low);
+
+            FVGData[idx].creationBar=bar;
+
+            FVGData[idx].displacementBar=1;
+
+            FVGData[idx].creationTime=
+               iTime(_Symbol,tf,bar);
+
+            return true;
+         }
+      }
+   }
+
+   return false;
+}
+
+//----------------------------------------------------
+// FVG Fill Percentage
+//----------------------------------------------------
+
+double CurrentFVGFill(
+   ENUM_TIMEFRAMES tf)
+{
+   int idx=StructureIndex(tf);
+
+   if(idx<0)
+      return 100.0;
+
+   if(!FVGData[idx].valid)
+      return 100.0;
+
+   double price=
+      SymbolInfoDouble(
+         _Symbol,
+         SYMBOL_BID);
+
+   //---------------------------------------
+   // Bullish
+   //---------------------------------------
+
+   if(FVGData[idx].direction==
+      DIRECTION_BULLISH)
+   {
+      if(price>=FVGData[idx].high)
+         return 0.0;
+
+      if(price<=FVGData[idx].low)
+         return 100.0;
+
+      return
+         ((FVGData[idx].high-price)
+         /
+         (FVGData[idx].high-
+         FVGData[idx].low))
+         *100.0;
+   }
+
+   //---------------------------------------
+   // Bearish
+   //---------------------------------------
+
+   if(price<=FVGData[idx].low)
+      return 0.0;
+
+   if(price>=FVGData[idx].high)
+      return 100.0;
+
+   return
+      ((price-
+      FVGData[idx].low)
+      /
+      (FVGData[idx].high-
+      FVGData[idx].low))
+      *100.0;
+}
+
+//----------------------------------------------------
+// Update FVG State
+//----------------------------------------------------
+
+void UpdateFVGState(
+   ENUM_TIMEFRAMES tf)
+{
+   int idx=StructureIndex(tf);
+
+   if(idx<0)
+      return;
+
+   if(!FVGData[idx].valid)
+      return;
+
+   FVGData[idx].filledPercent=
+      CurrentFVGFill(tf);
+
+   //---------------------------------------
+
+   if(FVGData[idx].filledPercent>0)
+      FVGData[idx].touchCount++;
+
+   //---------------------------------------
+
+   if(FVGData[idx].filledPercent
+      >=100.0)
+   {
+      FVGData[idx].invalidated=true;
+   }
+
+   //---------------------------------------
+
+   if(FVGData[idx].filledPercent
+      <=MaximumFillPercent)
+   {
+      FVGData[idx].mitigated=true;
    }
 }
 
 //----------------------------------------------------
-
-bool ValidBullishFVG()
-{
-   return
-      CurrentFVG.valid &&
-      CurrentFVG.direction==
-      FVG_BULLISH &&
-      CurrentFVG.score>=
-      MinimumFVGScore;
-}
-
+// Update FVG Engine
 //----------------------------------------------------
 
-bool ValidBearishFVG()
+void UpdateFVGEngine()
 {
-   return
-      CurrentFVG.valid &&
-      CurrentFVG.direction==
-      FVG_BEARISH &&
-      CurrentFVG.score>=
-      MinimumFVGScore;
+   for(int i=0;
+       i<ACTIVE_SCAN_TIMEFRAMES;
+       i++)
+   {
+      DetectDisplacementFVG(
+         StructureTF[i]);
+
+      UpdateFVGState(
+         StructureTF[i]);
+   }
 }
 
 
