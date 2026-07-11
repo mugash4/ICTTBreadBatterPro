@@ -3346,8 +3346,8 @@ double ImpulseHigh(
       iHigh(_Symbol,tf,startBar);
 
    for(int bar=startBar;
-       bar<=endBar;
-       bar++)
+       bar>=endBar;
+       bar--)
    {
       highest=
          MathMax(
@@ -3371,8 +3371,8 @@ double ImpulseLow(
       iLow(_Symbol,tf,startBar);
 
    for(int bar=startBar;
-       bar<=endBar;
-       bar++)
+       bar>=endBar;
+       bar--)
    {
       lowest=
          MathMin(
