@@ -4637,7 +4637,7 @@ bool InEquilibrium(
 
 
 //====================================================
-// SECTION 18 - INSTITUTIONAL ORDER BLOCK ENGINE
+// SECTION 18 - ICT ORDER BLOCK ENGINE
 //====================================================
 
 //----------------------------------------------------
@@ -4646,17 +4646,19 @@ bool InEquilibrium(
 
 input bool RequireOrderBlock=true;
 
-input double MaximumOrderBlockATR=2.0;
+input bool RequireDisplacementForOB=true;
 
-input double MinimumOrderBlockBodyPercent=50.0;
+input bool RequireFVGForOB=true;
 
-input bool RequireFVGAfterOrderBlock=true;
+input double MaximumOrderBlockATR=2.00;
+
+input double MinimumOrderBlockBody=50.0;
 
 //----------------------------------------------------
-// Order Block
+// Order Block State
 //----------------------------------------------------
 
-struct OrderBlock
+struct OrderBlockState
 {
    bool valid;
 
@@ -4664,34 +4666,46 @@ struct OrderBlock
 
    ENUM_DIRECTION direction;
 
+   int candleBar;
+
+   datetime time;
+
    double high;
 
    double low;
 
+   double open;
+
+   double close;
+
    double midpoint;
 
-   double size;
+   double range;
+
+   double bodyPercent;
 
    double score;
 
-   datetime creationTime;
-
-   int creationBar;
-
-   int displacementBar;
+   bool touched;
 
    bool mitigated;
+
+   bool rejected;
 
    bool invalidated;
 
    int touchCount;
+
+   int mitigationCount;
+
+   datetime firstTouchTime;
 };
 
-OrderBlock
+OrderBlockState
 OrderBlockData[ACTIVE_SCAN_TIMEFRAMES];
 
 //----------------------------------------------------
-// Reset Order Block
+// Reset
 //----------------------------------------------------
 
 void ResetOrderBlock(
@@ -4708,119 +4722,10 @@ void ResetOrderBlock(
 }
 
 //----------------------------------------------------
-// Order Block Size
+// Helpers
 //----------------------------------------------------
 
-bool ValidOrderBlockSize(
-   ENUM_TIMEFRAMES tf,
-   double high,
-   double low)
-{
-   double atr=
-      GetATR(tf);
-
-   if(atr<=0)
-      return false;
-
-   return
-      MathAbs(high-low)
-      <=
-      atr*
-      MaximumOrderBlockATR;
-}
-
-//----------------------------------------------------
-// Strong Body
-//----------------------------------------------------
-
-bool StrongOrderBlockBody(
-   ENUM_TIMEFRAMES tf,
-   int bar)
-{
-   return
-      CandleBodyPercent(
-         tf,
-         bar)
-      >=
-      MinimumOrderBlockBodyPercent;
-}
-
-
-//----------------------------------------------------
-// Bullish Order Block
-//----------------------------------------------------
-
-bool BullishOrderBlock(
-   ENUM_TIMEFRAMES tf,
-   int bar,
-   double &high,
-   double &low)
-{
-   if(iClose(_Symbol,tf,bar)
-      >=
-      iOpen(_Symbol,tf,bar))
-      return false;
-
-   high=
-      iHigh(_Symbol,tf,bar);
-
-   low=
-      iLow(_Symbol,tf,bar);
-
-   if(!ValidOrderBlockSize(
-      tf,
-      high,
-      low))
-      return false;
-
-   if(!StrongOrderBlockBody(
-      tf,
-      bar))
-      return false;
-
-   return true;
-}
-
-//----------------------------------------------------
-// Bearish Order Block
-//----------------------------------------------------
-
-bool BearishOrderBlock(
-   ENUM_TIMEFRAMES tf,
-   int bar,
-   double &high,
-   double &low)
-{
-   if(iClose(_Symbol,tf,bar)
-      <=
-      iOpen(_Symbol,tf,bar))
-      return false;
-
-   high=
-      iHigh(_Symbol,tf,bar);
-
-   low=
-      iLow(_Symbol,tf,bar);
-
-   if(!ValidOrderBlockSize(
-      tf,
-      high,
-      low))
-      return false;
-
-   if(!StrongOrderBlockBody(
-      tf,
-      bar))
-      return false;
-
-   return true;
-}
-
-//----------------------------------------------------
-// Detect Institutional Order Block
-//----------------------------------------------------
-
-bool DetectOrderBlock(
+bool OrderBlockConfirmed(
    ENUM_TIMEFRAMES tf)
 {
    int idx=
@@ -4829,113 +4734,161 @@ bool DetectOrderBlock(
    if(idx<0)
       return false;
 
-   ResetOrderBlock(tf);
+   return
+      OrderBlockData[idx]
+      .confirmed;
+}
 
-   //-----------------------------------------
-   // Must have confirmed displacement
-   //-----------------------------------------
+//----------------------------------------------------
 
-   if(!DisplacementConfirmed(tf))
+double OrderBlockMidpoint(
+   ENUM_TIMEFRAMES tf)
+{
+   int idx=
+      StructureIndex(tf);
+
+   if(idx<0)
+      return 0;
+
+   return
+      OrderBlockData[idx]
+      .midpoint;
+}
+
+//----------------------------------------------------
+// Institutional Filters
+//----------------------------------------------------
+
+bool ValidOrderBlockBody(
+   ENUM_TIMEFRAMES tf,
+   int bar)
+{
+   return
+      CandleBodyPercent(
+         tf,
+         bar)
+      >=
+      MinimumOrderBlockBody;
+}
+
+//----------------------------------------------------
+
+bool ValidOrderBlockSize(
+   ENUM_TIMEFRAMES tf,
+   int bar)
+{
+   double atr=
+      GetATR(tf);
+
+   if(atr<=0)
       return false;
 
-   //-----------------------------------------
-   // Must have confirmed FVG
-   //-----------------------------------------
+   double range=
+      iHigh(_Symbol,tf,bar)
+      -
+      iLow(_Symbol,tf,bar);
 
-   if(RequireFVGAfterOrderBlock)
+   return
+      range
+      <=
+      atr
+      *
+      MaximumOrderBlockATR;
+}
+
+//----------------------------------------------------
+// Find ICT Order Block
+//----------------------------------------------------
+
+bool FindICTOrderBlock(
+   ENUM_TIMEFRAMES tf,
+   int &orderBlockBar)
+{
+   orderBlockBar=-1;
+
+   if(RequireDisplacementForOB)
    {
+      if(!DisplacementConfirmed(tf))
+         return false;
+   }
+
+   if(RequireFVGForOB)
+   {
+      int idx=
+         StructureIndex(tf);
+
+      if(idx<0)
+         return false;
+
       if(!FVGData[idx].valid)
          return false;
    }
 
-   double high,low;
+   int startBar=
+      DisplacementStartBar(tf);
 
-   double bestScore=-1.0;
-
-   double bestHigh=0.0;
-   double bestLow=0.0;
-
-   int bestBar=-1;
-
-   //-----------------------------------------
-   // Search before displacement
-   //-----------------------------------------
-
-   for(int bar=2; bar<=8; bar++)
-   {
-      //--------------------------------------
-      // Bullish
-      //--------------------------------------
-
-      if(StructureDirection(tf)
-         ==
-         DIRECTION_BULLISH)
-      {
-         if(BullishOrderBlock(
-            tf,
-            bar,
-            high,
-            low))
-         {
-            double score=
-               CalculateOrderBlockScore(
-                  tf,
-                  high,
-                  low,
-                  bar);
-
-            if(score>bestScore)
-            {
-               bestScore=score;
-
-               bestHigh=high;
-               bestLow=low;
-
-               bestBar=bar;
-            }
-         }
-      }
-
-      //--------------------------------------
-      // Bearish
-      //--------------------------------------
-
-      if(StructureDirection(tf)
-         ==
-         DIRECTION_BEARISH)
-      {
-         if(BearishOrderBlock(
-            tf,
-            bar,
-            high,
-            low))
-         {
-            double score=
-               CalculateOrderBlockScore(
-                  tf,
-                  high,
-                  low,
-                  bar);
-
-            if(score>bestScore)
-            {
-               bestScore=score;
-
-               bestHigh=high;
-               bestLow=low;
-
-               bestBar=bar;
-            }
-         }
-      }
-   }
-
-   if(bestBar==-1)
+   if(startBar<0)
       return false;
 
-   //-----------------------------------------
-   // Save Order Block
-   //-----------------------------------------
+   ENUM_DIRECTION direction=
+      StructureDirection(tf);
+
+   //--------------------------------------
+   // Start with the candle immediately
+   // preceding the impulse
+   //--------------------------------------
+
+   int bar=
+      startBar+1;
+
+   while(bar<=20)
+   {
+      bool opposite=false;
+
+      if(direction==DIRECTION_BULLISH)
+      {
+         opposite=
+            iClose(_Symbol,tf,bar)
+            <
+            iOpen(_Symbol,tf,bar);
+      }
+      else
+      {
+         opposite=
+            iClose(_Symbol,tf,bar)
+            >
+            iOpen(_Symbol,tf,bar);
+      }
+
+      if(opposite)
+      {
+         if(ValidOrderBlockBody(tf,bar) &&
+            ValidOrderBlockSize(tf,bar))
+         {
+            orderBlockBar=bar;
+            return true;
+         }
+      }
+
+      bar++;
+   }
+
+   return false;
+}
+
+//----------------------------------------------------
+// Save ICT Order Block
+//----------------------------------------------------
+
+void SaveOrderBlock(
+   ENUM_TIMEFRAMES tf,
+   int bar)
+{
+   int idx=
+      StructureIndex(tf);
+
+   if(idx<0)
+      return;
 
    OrderBlockData[idx].valid=true;
 
@@ -4944,98 +4897,47 @@ bool DetectOrderBlock(
    OrderBlockData[idx].direction=
       StructureDirection(tf);
 
+   OrderBlockData[idx].candleBar=
+      bar;
+
+   OrderBlockData[idx].time=
+      iTime(_Symbol,tf,bar);
+
    OrderBlockData[idx].high=
-      bestHigh;
+      iHigh(_Symbol,tf,bar);
 
    OrderBlockData[idx].low=
-      bestLow;
+      iLow(_Symbol,tf,bar);
+
+   OrderBlockData[idx].open=
+      iOpen(_Symbol,tf,bar);
+
+   OrderBlockData[idx].close=
+      iClose(_Symbol,tf,bar);
+
+   OrderBlockData[idx].range=
+      OrderBlockData[idx].high
+      -
+      OrderBlockData[idx].low;
 
    OrderBlockData[idx].midpoint=
-      (bestHigh+bestLow)/2.0;
+      (
+         OrderBlockData[idx].high
+         +
+         OrderBlockData[idx].low
+      )/2.0;
 
-   OrderBlockData[idx].size=
-      MathAbs(bestHigh-bestLow);
-
-   OrderBlockData[idx].creationBar=
-      bestBar;
-
-   OrderBlockData[idx].displacementBar=1;
-
-   OrderBlockData[idx].creationTime=
-      iTime(_Symbol,tf,bestBar);
-
-   OrderBlockData[idx].score=
-      bestScore;
-
-   return true;
-}
-
-//----------------------------------------------------
-// Order Block Score
-//----------------------------------------------------
-
-double CalculateOrderBlockScore(
-   ENUM_TIMEFRAMES tf,
-   double high,
-   double low,
-   int bar)
-{
-   double score=0.0;
-
-   //-----------------------------------------
-   // Body Strength
-   //-----------------------------------------
-
-   score+=
+   OrderBlockData[idx].bodyPercent=
       CandleBodyPercent(
          tf,
-         bar)
-      *0.30;
-
-   //-----------------------------------------
-   // Close Strength
-   //-----------------------------------------
-
-   score+=
-      CandleClosePercent(
-         tf,
-         bar)
-      *0.20;
-
-   //-----------------------------------------
-   // Freshness
-   //-----------------------------------------
-
-   score+=
-      MathMax(
-         20-(bar*2),
-         0);
-
-   //-----------------------------------------
-   // Size
-   //-----------------------------------------
-
-   double atr=
-      GetATR(tf);
-
-   if(atr>0)
-   {
-      score+=
-      MathMin(
-         (MathAbs(high-low)/atr)
-         *30,
-         30);
-   }
-
-   return
-      MathMin(score,100.0);
+         bar);
 }
 
 //----------------------------------------------------
-// Update Order Block
+// Detect ICT Order Block
 //----------------------------------------------------
 
-void UpdateOrderBlock(
+void DetectOrderBlock(
    ENUM_TIMEFRAMES tf)
 {
    int idx=
@@ -5044,42 +4946,203 @@ void UpdateOrderBlock(
    if(idx<0)
       return;
 
-   if(!OrderBlockData[idx].valid)
-      return;
+   ResetOrderBlock(tf);
 
-   double price=
-      SymbolInfoDouble(
-         _Symbol,
-         SYMBOL_BID);
+   int orderBlockBar=-1;
 
-   //--------------------------------------
-
-   if(price<=OrderBlockData[idx].high &&
-      price>=OrderBlockData[idx].low)
+   if(!FindICTOrderBlock(
+      tf,
+      orderBlockBar))
    {
-      OrderBlockData[idx].mitigated=true;
-
-      OrderBlockData[idx].touchCount++;
+      return;
    }
 
+   SaveOrderBlock(
+      tf,
+      orderBlockBar);
+}
+
+//----------------------------------------------------
+// Calculate ICT Order Block Score
+//----------------------------------------------------
+
+double CalculateOrderBlockScore(
+   ENUM_TIMEFRAMES tf)
+{
+   int idx=
+      StructureIndex(tf);
+
+   if(idx<0)
+      return 0.0;
+
+   if(!OrderBlockData[idx].confirmed)
+      return 0.0;
+
+   double score=0.0;
+
+   //--------------------------------------
+   // Body Quality
    //--------------------------------------
 
-   if(StructureDirection(tf)
+   score+=
+      OrderBlockData[idx]
+      .bodyPercent
+      *0.35;
+
+   //--------------------------------------
+   // Displacement Quality
+   //--------------------------------------
+
+   score+=
+      CurrentDisplacementScore(tf)
+      *0.40;
+
+   //--------------------------------------
+   // FVG Confirmation
+   //--------------------------------------
+
+   if(FVGData[idx].valid)
+      score+=25.0;
+
+   return
+      MathMin(score,100.0);
+}
+
+//----------------------------------------------------
+// Update Order Block Score
+//----------------------------------------------------
+
+void UpdateOrderBlockScore(
+   ENUM_TIMEFRAMES tf)
+{
+   int idx=
+      StructureIndex(tf);
+
+   if(idx<0)
+      return;
+
+   if(!OrderBlockData[idx].confirmed)
+      return;
+
+   OrderBlockData[idx].score=
+      CalculateOrderBlockScore(tf);
+}
+
+//----------------------------------------------------
+// Detect Order Block Mitigation
+//----------------------------------------------------
+
+void DetectOrderBlockMitigation(
+   ENUM_TIMEFRAMES tf)
+{
+   int idx=
+      StructureIndex(tf);
+
+   if(idx<0)
+      return;
+
+   if(!OrderBlockData[idx].confirmed)
+      return;
+
+   if(OrderBlockData[idx].invalidated)
+      return;
+
+   double high=
+      iHigh(_Symbol,tf,1);
+
+   double low=
+      iLow(_Symbol,tf,1);
+
+   double midpoint=
+      OrderBlockData[idx].midpoint;
+
+   //--------------------------------------
+   // Bullish Order Block
+   //--------------------------------------
+
+   if(OrderBlockData[idx].direction
       ==
       DIRECTION_BULLISH)
    {
-      if(price<
+      if(low<=midpoint)
+      {
+         if(!OrderBlockData[idx].touched)
+         {
+            OrderBlockData[idx].touched=true;
+
+            OrderBlockData[idx].touchCount=1;
+
+            OrderBlockData[idx].firstTouchTime=
+               iTime(_Symbol,tf,1);
+         }
+         else
+         {
+            OrderBlockData[idx].touchCount++;
+         }
+      }
+   }
+
+   //--------------------------------------
+   // Bearish Order Block
+   //--------------------------------------
+
+   else
+   {
+      if(high>=midpoint)
+      {
+         if(!OrderBlockData[idx].touched)
+         {
+            OrderBlockData[idx].touched=true;
+
+            OrderBlockData[idx].touchCount=1;
+
+            OrderBlockData[idx].firstTouchTime=
+               iTime(_Symbol,tf,1);
+         }
+         else
+         {
+            OrderBlockData[idx].touchCount++;
+         }
+      }
+   }
+}
+
+//----------------------------------------------------
+// Detect Invalidation
+//----------------------------------------------------
+
+void DetectOrderBlockInvalidation(
+   ENUM_TIMEFRAMES tf)
+{
+   int idx=
+      StructureIndex(tf);
+
+   if(idx<0)
+      return;
+
+   if(!OrderBlockData[idx].confirmed)
+      return;
+
+   if(OrderBlockData[idx].direction
+      ==
+      DIRECTION_BULLISH)
+   {
+      if(iClose(_Symbol,tf,1)
+         <
          OrderBlockData[idx].low)
       {
-         OrderBlockData[idx].invalidated=true;
+         OrderBlockData[idx]
+         .invalidated=true;
       }
    }
    else
    {
-      if(price>
+      if(iClose(_Symbol,tf,1)
+         >
          OrderBlockData[idx].high)
       {
-         OrderBlockData[idx].invalidated=true;
+         OrderBlockData[idx]
+         .invalidated=true;
       }
    }
 }
@@ -5094,14 +5157,68 @@ void UpdateOrderBlockEngine()
        i<ACTIVE_SCAN_TIMEFRAMES;
        i++)
    {
-      DetectOrderBlock(
-         StructureTF[i]);
+      ENUM_TIMEFRAMES tf=
+         StructureTF[i];
 
-      UpdateOrderBlock(
-         StructureTF[i]);
+      DetectOrderBlock(tf);
+
+      UpdateOrderBlockScore(tf);
+
+      DetectOrderBlockMitigation(tf);
+
+      DetectOrderBlockInvalidation(tf);
    }
 }
 
+//----------------------------------------------------
+// Helper Functions
+//----------------------------------------------------
+
+double CurrentOrderBlockScore(
+   ENUM_TIMEFRAMES tf)
+{
+   int idx=
+      StructureIndex(tf);
+
+   if(idx<0)
+      return 0.0;
+
+   return
+      OrderBlockData[idx]
+      .score;
+}
+
+//----------------------------------------------------
+
+bool OrderBlockMitigated(
+   ENUM_TIMEFRAMES tf)
+{
+   int idx=
+      StructureIndex(tf);
+
+   if(idx<0)
+      return false;
+
+   return
+      OrderBlockData[idx]
+      .mitigated;
+}
+
+//----------------------------------------------------
+
+bool OrderBlockInvalidated(
+   ENUM_TIMEFRAMES tf)
+{
+   int idx=
+      StructureIndex(tf);
+
+   if(idx<0)
+      return false;
+
+   return
+      OrderBlockData[idx]
+      .invalidated;
+}
 
 
 
