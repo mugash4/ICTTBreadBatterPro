@@ -3015,19 +3015,21 @@ bool CHOCHConfirmed(
 // SECTION 15 - INSTITUTIONAL DISPLACEMENT ENGINE
 //====================================================
 
+ //====================================================
+// SECTION 15 - INSTITUTIONAL DISPLACEMENT ENGINE
+//====================================================
+
 //----------------------------------------------------
 // Inputs
 //----------------------------------------------------
 
-input double MinimumDisplacementATR = 1.20;
+input double MinimumDisplacementATR      = 1.20;
 
-input int MinimumImpulseCandles = 2;
+input int    MinimumImpulseCandles       = 2;
 
-input double MinimumClosePercent = 70.0;
+input double MinimumBodyPercent          = 70.0;
 
-//----------------------------------------------------
-// Displacement State
-//----------------------------------------------------
+input double MinimumClosePercent         = 70.0;
 
 //----------------------------------------------------
 // Displacement State
@@ -3041,15 +3043,19 @@ struct DisplacementState
 
    ENUM_DIRECTION direction;
 
-   int startBar;          // Start of impulse
+   int startBar;
 
-   int endBar;            // End of impulse
+   int endBar;
 
-   int displacementBar;   // Main displacement candle
+   int displacementBar;
+
+   int impulseCandles;
 
    double impulseHigh;
 
    double impulseLow;
+
+   double impulseRange;
 
    double displacementHigh;
 
@@ -3057,61 +3063,19 @@ struct DisplacementState
 
    double displacementSize;
 
+   double ATRMultiple;
+
+   double bodyPercent;
+
+   double closePercent;
+
    double score;
 
    datetime time;
 };
 
-//----------------------------------------------------
-// Displacement Helpers
-//----------------------------------------------------
-
-int DisplacementStartBar(
-   ENUM_TIMEFRAMES tf)
-{
-   int idx=
-      StructureIndex(tf);
-
-   if(idx<0)
-      return -1;
-
-   return
-      DisplacementData[idx]
-      .startBar;
-}
-
-//----------------------------------------------------
-
-int DisplacementEndBar(
-   ENUM_TIMEFRAMES tf)
-{
-   int idx=
-      StructureIndex(tf);
-
-   if(idx<0)
-      return -1;
-
-   return
-      DisplacementData[idx]
-      .endBar;
-}
-
-//----------------------------------------------------
-
-int DisplacementBar(
-   ENUM_TIMEFRAMES tf)
-{
-   int idx=
-      StructureIndex(tf);
-
-   if(idx<0)
-      return -1;
-
-   return
-      DisplacementData[idx]
-      .displacementBar;
-}
-
+DisplacementState
+DisplacementData[ACTIVE_SCAN_TIMEFRAMES];
 
 //----------------------------------------------------
 // Reset
@@ -3130,8 +3094,96 @@ void ResetDisplacement(
       DisplacementData[idx]);
 }
 
+
 //----------------------------------------------------
-// Close Position Percentage
+// Helpers
+//----------------------------------------------------
+
+int DisplacementIndex(
+   ENUM_TIMEFRAMES tf)
+{
+   return
+      StructureIndex(tf);
+}
+
+//----------------------------------------------------
+
+bool DisplacementConfirmed(
+   ENUM_TIMEFRAMES tf)
+{
+   int idx=
+      DisplacementIndex(tf);
+
+   if(idx<0)
+      return false;
+
+   return
+      DisplacementData[idx].confirmed;
+}
+
+//----------------------------------------------------
+
+int DisplacementStartBar(
+   ENUM_TIMEFRAMES tf)
+{
+   int idx=
+      DisplacementIndex(tf);
+
+   if(idx<0)
+      return -1;
+
+   return
+      DisplacementData[idx].startBar;
+}
+
+//----------------------------------------------------
+
+int DisplacementEndBar(
+   ENUM_TIMEFRAMES tf)
+{
+   int idx=
+      DisplacementIndex(tf);
+
+   if(idx<0)
+      return -1;
+
+   return
+      DisplacementData[idx].endBar;
+}
+
+//----------------------------------------------------
+
+int DisplacementBar(
+   ENUM_TIMEFRAMES tf)
+{
+   int idx=
+      DisplacementIndex(tf);
+
+   if(idx<0)
+      return -1;
+
+   return
+      DisplacementData[idx].displacementBar;
+}
+
+//----------------------------------------------------
+
+double DisplacementScore(
+   ENUM_TIMEFRAMES tf)
+{
+   int idx=
+      DisplacementIndex(tf);
+
+   if(idx<0)
+      return 0;
+
+   return
+      DisplacementData[idx].score;
+}
+
+
+//----------------------------------------------------
+// Candle Close Position
 //----------------------------------------------------
 
 double CandleClosePercent(
@@ -3144,6 +3196,9 @@ double CandleClosePercent(
    double low=
       iLow(_Symbol,tf,bar);
 
+   double open=
+      iOpen(_Symbol,tf,bar);
+
    double close=
       iClose(_Symbol,tf,bar);
 
@@ -3154,27 +3209,34 @@ double CandleClosePercent(
       return 0;
 
    //--------------------------------------
-   // Bullish candle
+   // Bullish
    //--------------------------------------
 
-   if(close>=iOpen(_Symbol,tf,bar))
+   if(close>=open)
+   {
       return
-      ((close-low)/range)*100.0;
+      ((close-low)
+      /range)
+      *100.0;
+   }
 
    //--------------------------------------
-   // Bearish candle
+   // Bearish
    //--------------------------------------
 
    return
-   ((high-close)/range)*100.0;
+   ((high-close)
+   /range)
+   *100.0;
 }
 
 //----------------------------------------------------
-// Calculate Impulse Range
+// ATR Expansion
 //----------------------------------------------------
 
 double ImpulseATR(
-   ENUM_TIMEFRAMES tf)
+   ENUM_TIMEFRAMES tf,
+   int bar)
 {
    double atr=
       GetATR(tf);
@@ -3183,109 +3245,225 @@ double ImpulseATR(
       return 0;
 
    double range=
-      iHigh(_Symbol,tf,1)
+      iHigh(_Symbol,tf,bar)
       -
-      iLow(_Symbol,tf,1);
+      iLow(_Symbol,tf,bar);
 
    return
       range/atr;
 }
 
 //----------------------------------------------------
-// Strong Displacement
+// Impulse Body
 //----------------------------------------------------
 
-bool StrongDisplacement(
-   ENUM_TIMEFRAMES tf)
+bool StrongImpulseBody(
+   ENUM_TIMEFRAMES tf,
+   int bar)
 {
-   if(!BOSConfirmed(tf))
-      return false;
-
-   if(ImpulseATR(tf)
-      <
-      MinimumDisplacementATR)
-      return false;
-
-   if(CandleBodyPercent(tf,1)
-      <
-      MinimumBodyPercent)
-      return false;
-
-   if(CandleClosePercent(tf,1)
-      <
-      MinimumClosePercent)
-      return false;
-
-   return true;
+   return
+      CandleBodyPercent(
+         tf,
+         bar)
+      >=
+      MinimumBodyPercent;
 }
 
 //----------------------------------------------------
-// Count Impulse Candles
+// Strong Close
+//----------------------------------------------------
+
+bool StrongClose(
+   ENUM_TIMEFRAMES tf,
+   int bar)
+{
+   return
+      CandleClosePercent(
+         tf,
+         bar)
+      >=
+      MinimumClosePercent;
+}
+
+//----------------------------------------------------
+// Count Institutional Impulse
 //----------------------------------------------------
 
 int CountImpulseCandles(
-   ENUM_TIMEFRAMES tf)
+   ENUM_TIMEFRAMES tf,
+   int startBar)
 {
    int count=0;
 
-   for(int bar=1; bar<=5; bar++)
+   ENUM_DIRECTION direction=
+      StructureDirection(tf);
+
+   for(int bar=startBar; bar<=10; bar++)
    {
-      if(CandleBodyPercent(tf,bar)>=MinimumBodyPercent)
-         count++;
+      bool valid=false;
+
+      //--------------------------------------
+      // Bullish Impulse
+      //--------------------------------------
+
+      if(direction==DIRECTION_BULLISH)
+      {
+         valid=
+            iClose(_Symbol,tf,bar)
+            >
+            iOpen(_Symbol,tf,bar);
+      }
+
+      //--------------------------------------
+      // Bearish Impulse
+      //--------------------------------------
+
       else
+      {
+         valid=
+            iClose(_Symbol,tf,bar)
+            <
+            iOpen(_Symbol,tf,bar);
+      }
+
+      if(!valid)
          break;
+
+      if(!StrongImpulseBody(tf,bar))
+         break;
+
+      count++;
    }
 
    return count;
 }
 
 //----------------------------------------------------
-// Calculate Displacement Score
+// Impulse High
 //----------------------------------------------------
 
-double DisplacementScore(
-   ENUM_TIMEFRAMES tf)
+double ImpulseHigh(
+   ENUM_TIMEFRAMES tf,
+   int startBar,
+   int endBar)
 {
-   double score=0;
+   double highest=
+      iHigh(_Symbol,tf,startBar);
 
-   //------------------------------------------
-   // ATR Expansion
-   //------------------------------------------
+   for(int bar=startBar;
+       bar<=endBar;
+       bar++)
+   {
+      highest=
+         MathMax(
+            highest,
+            iHigh(_Symbol,tf,bar));
+   }
 
-   double atr=ImpulseATR(tf);
-
-   score+=MathMin(atr*20.0,40.0);
-
-   //------------------------------------------
-   // Candle Body
-   //------------------------------------------
-
-   score+=
-      CandleBodyPercent(tf,1)
-      *0.30;
-
-   //------------------------------------------
-   // Close Position
-   //------------------------------------------
-
-   score+=
-      CandleClosePercent(tf,1)
-      *0.20;
-
-   //------------------------------------------
-   // Multi Candle Impulse
-   //------------------------------------------
-
-   score+=
-      CountImpulseCandles(tf)
-      *5.0;
-
-   return
-      MathMin(score,100.0);
+   return highest;
 }
 
 //----------------------------------------------------
-// Detect Displacement
+// Impulse Low
+//----------------------------------------------------
+
+double ImpulseLow(
+   ENUM_TIMEFRAMES tf,
+   int startBar,
+   int endBar)
+{
+   double lowest=
+      iLow(_Symbol,tf,startBar);
+
+   for(int bar=startBar;
+       bar<=endBar;
+       bar++)
+   {
+      lowest=
+         MathMin(
+            lowest,
+            iLow(_Symbol,tf,bar));
+   }
+
+   return lowest;
+}
+
+//----------------------------------------------------
+// Detect Institutional Impulse
+//----------------------------------------------------
+
+bool DetectImpulse(
+   ENUM_TIMEFRAMES tf,
+   int &startBar,
+   int &endBar,
+   int &displacementBar)
+{
+   //--------------------------------------
+   // Structure Required
+   //--------------------------------------
+
+   if(!BOSConfirmed(tf))
+      return false;
+
+   //--------------------------------------
+   // Displacement Candle
+   //--------------------------------------
+
+   displacementBar=1;
+
+   //--------------------------------------
+   // Strong Candle
+   //--------------------------------------
+
+   if(!StrongImpulseBody(
+      tf,
+      displacementBar))
+      return false;
+
+   if(!StrongClose(
+      tf,
+      displacementBar))
+      return false;
+
+   if(ImpulseATR(
+      tf,
+      displacementBar)
+      <
+      MinimumDisplacementATR)
+      return false;
+
+   //--------------------------------------
+   // Count Impulse
+   //--------------------------------------
+
+   int candles=
+      CountImpulseCandles(
+         tf,
+         displacementBar);
+
+   if(candles<
+      MinimumImpulseCandles)
+      return false;
+
+   //--------------------------------------
+   // Impulse Leg
+   //--------------------------------------
+
+   startBar=
+      displacementBar;
+
+   endBar=
+      displacementBar
+      +
+      candles
+      -
+      1;
+
+   return true;
+}
+
+//----------------------------------------------------
+// Detect Institutional Displacement
 //----------------------------------------------------
 
 void DetectDisplacement(
@@ -3299,10 +3477,66 @@ void DetectDisplacement(
 
    ResetDisplacement(tf);
 
-   //------------------------------------------
+   //--------------------------------------
+   // Detect Impulse
+   //--------------------------------------
 
-   if(!StrongDisplacement(tf))
+   int startBar=-1;
+
+   int endBar=-1;
+
+   int displacementBar=-1;
+
+   if(!DetectImpulse(
+      tf,
+      startBar,
+      endBar,
+      displacementBar))
+   {
       return;
+   }
+
+   //--------------------------------------
+   // Calculate Impulse Data
+   //--------------------------------------
+
+   double impulseHigh=
+      ImpulseHigh(
+         tf,
+         startBar,
+         endBar);
+
+   double impulseLow=
+      ImpulseLow(
+         tf,
+         startBar,
+         endBar);
+
+   double displacementHigh=
+      iHigh(
+         _Symbol,
+         tf,
+         displacementBar);
+
+   double displacementLow=
+      iLow(
+         _Symbol,
+         tf,
+         displacementBar);
+
+   double displacementSize=
+      displacementHigh
+      -
+      displacementLow;
+
+   int impulseCandles=
+      CountImpulseCandles(
+         tf,
+         displacementBar);
+
+   //--------------------------------------
+   // Save Displacement
+   //--------------------------------------
 
    DisplacementData[idx].valid=true;
 
@@ -3311,53 +3545,143 @@ void DetectDisplacement(
    DisplacementData[idx].direction=
       StructureDirection(tf);
 
-   DisplacementData[idx].impulseRange=
-      iHigh(_Symbol,tf,1)
-      -
-      iLow(_Symbol,tf,1);
+   DisplacementData[idx].startBar=
+      startBar;
 
-   DisplacementData[idx].ATRMultiple=
-      ImpulseATR(tf);
+   DisplacementData[idx].endBar=
+      endBar;
 
-   DisplacementData[idx].bodyPercent=
-      CandleBodyPercent(tf,1);
-
-   DisplacementData[idx].closePercent=
-      CandleClosePercent(tf,1);
+   DisplacementData[idx].displacementBar=
+      displacementBar;
 
    DisplacementData[idx].impulseCandles=
-      CountImpulseCandles(tf);
+      impulseCandles;
+
+   DisplacementData[idx].impulseHigh=
+      impulseHigh;
+
+   DisplacementData[idx].impulseLow=
+      impulseLow;
+
+   DisplacementData[idx].impulseRange=
+      impulseHigh
+      -
+      impulseLow;
+
+   DisplacementData[idx].displacementHigh=
+      displacementHigh;
+
+   DisplacementData[idx].displacementLow=
+      displacementLow;
+
+   DisplacementData[idx].displacementSize=
+      displacementSize;
+
+   DisplacementData[idx].ATRMultiple=
+      ImpulseATR(
+         tf,
+         displacementBar);
+
+   DisplacementData[idx].bodyPercent=
+      CandleBodyPercent(
+         tf,
+         displacementBar);
+
+   DisplacementData[idx].closePercent=
+      CandleClosePercent(
+         tf,
+         displacementBar);
 
    DisplacementData[idx].time=
-      iTime(_Symbol,tf,1);
+      iTime(
+         _Symbol,
+         tf,
+         displacementBar);
+}
 
 //----------------------------------------------------
-// Save Confirmed Structure
+// Calculate Institutional Score
 //----------------------------------------------------
 
-SaveStructureCache(
-   tf,
+double CalculateDisplacementScore(
+   ENUM_TIMEFRAMES tf)
+{
+   int idx=
+      StructureIndex(tf);
 
-   StructureDirection(tf),
+   if(idx<0)
+      return 0.0;
 
-   StructureBreakData[idx].structure,
+   if(!DisplacementData[idx].confirmed)
+      return 0.0;
 
-   LatestSwingHigh(tf).price,
+   double score=0.0;
 
-   LatestSwingLow(tf).price,
+   //--------------------------------------
+   // ATR Expansion
+   //--------------------------------------
 
-   LatestSwingHigh(tf).barIndex,
+   score+=
+      MathMin(
+         DisplacementData[idx]
+         .ATRMultiple
+         *20.0,
+         40.0);
 
-   LatestSwingLow(tf).barIndex,
+   //--------------------------------------
+   // Body
+   //--------------------------------------
 
-   StructureBreakData[idx].BOS,
+   score+=
+      DisplacementData[idx]
+      .bodyPercent
+      *0.30;
 
-   StructureBreakData[idx].MSS,
+   //--------------------------------------
+   // Close
+   //--------------------------------------
 
-   StructureBreakData[idx].CHOCH,
+   score+=
+      DisplacementData[idx]
+      .closePercent
+      *0.20;
 
-   true
-);
+   //--------------------------------------
+   // Impulse
+   //--------------------------------------
+
+   score+=
+      MathMin(
+         DisplacementData[idx]
+         .impulseCandles
+         *5.0,
+         10.0);
+
+   return
+      MathMin(
+         score,
+         100.0);
+}
+
+//----------------------------------------------------
+// Update Score
+//----------------------------------------------------
+
+void UpdateDisplacementScore(
+   ENUM_TIMEFRAMES tf)
+{
+   int idx=
+      StructureIndex(tf);
+
+   if(idx<0)
+      return;
+
+   if(!DisplacementData[idx].confirmed)
+      return;
+
+   DisplacementData[idx].score=
+      CalculateDisplacementScore(
+         tf);
 }
 
 //----------------------------------------------------
@@ -3370,40 +3694,34 @@ void UpdateDisplacementEngine()
        i<ACTIVE_SCAN_TIMEFRAMES;
        i++)
    {
-      DetectDisplacement(
-         StructureTF[i]);
+      ENUM_TIMEFRAMES tf=
+         StructureTF[i];
+
+      DetectDisplacement(tf);
+
+      UpdateDisplacementScore(tf);
    }
 }
 
 //----------------------------------------------------
-// Helper Functions
+// Current Displacement Score
 //----------------------------------------------------
 
-bool DisplacementConfirmed(
+double CurrentDisplacementScore(
    ENUM_TIMEFRAMES tf)
 {
    int idx=
       StructureIndex(tf);
 
    if(idx<0)
-      return false;
+      return 0.0;
 
    return
-      DisplacementData[idx].confirmed;
+      DisplacementData[idx].score;
 }
 
 //----------------------------------------------------
-
-double CurrentDisplacementScore(
-   ENUM_TIMEFRAMES tf)
-{
-   if(!DisplacementConfirmed(tf))
-      return 0;
-
-   return
-      DisplacementScore(tf);
-}
-
+// Current Impulse Candles
 //----------------------------------------------------
 
 int CurrentImpulseCandles(
@@ -3416,9 +3734,99 @@ int CurrentImpulseCandles(
       return 0;
 
    return
-      DisplacementData[idx].impulseCandles;
+      DisplacementData[idx]
+      .impulseCandles;
 }
 
+//----------------------------------------------------
+// Current Impulse High
+//----------------------------------------------------
+
+double CurrentImpulseHigh(
+   ENUM_TIMEFRAMES tf)
+{
+   int idx=
+      StructureIndex(tf);
+
+   if(idx<0)
+      return 0.0;
+
+   return
+      DisplacementData[idx]
+      .impulseHigh;
+}
+
+//----------------------------------------------------
+// Current Impulse Low
+//----------------------------------------------------
+
+double CurrentImpulseLow(
+   ENUM_TIMEFRAMES tf)
+{
+   int idx=
+      StructureIndex(tf);
+
+   if(idx<0)
+      return 0.0;
+
+   return
+      DisplacementData[idx]
+      .impulseLow;
+}
+
+//----------------------------------------------------
+// Current Displacement High
+//----------------------------------------------------
+
+double CurrentDisplacementHigh(
+   ENUM_TIMEFRAMES tf)
+{
+   int idx=
+      StructureIndex(tf);
+
+   if(idx<0)
+      return 0.0;
+
+   return
+      DisplacementData[idx]
+      .displacementHigh;
+}
+
+//----------------------------------------------------
+// Current Displacement Low
+//----------------------------------------------------
+
+double CurrentDisplacementLow(
+   ENUM_TIMEFRAMES tf)
+{
+   int idx=
+      StructureIndex(tf);
+
+   if(idx<0)
+      return 0.0;
+
+   return
+      DisplacementData[idx]
+      .displacementLow;
+}
+
+//----------------------------------------------------
+// Current Displacement Bar
+//----------------------------------------------------
+
+int CurrentDisplacementBar(
+   ENUM_TIMEFRAMES tf)
+{
+   int idx=
+      StructureIndex(tf);
+
+   if(idx<0)
+      return -1;
+
+   return
+      DisplacementData[idx]
+      .displacementBar;
+}
 
 
 
