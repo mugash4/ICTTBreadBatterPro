@@ -3029,6 +3029,10 @@ input double MinimumClosePercent = 70.0;
 // Displacement State
 //----------------------------------------------------
 
+//----------------------------------------------------
+// Displacement State
+//----------------------------------------------------
+
 struct DisplacementState
 {
    bool valid;
@@ -3037,21 +3041,77 @@ struct DisplacementState
 
    ENUM_DIRECTION direction;
 
-   double impulseRange;
+   int startBar;          // Start of impulse
 
-   double ATRMultiple;
+   int endBar;            // End of impulse
 
-   double bodyPercent;
+   int displacementBar;   // Main displacement candle
 
-   double closePercent;
+   double impulseHigh;
 
-   int impulseCandles;
+   double impulseLow;
+
+   double displacementHigh;
+
+   double displacementLow;
+
+   double displacementSize;
+
+   double score;
 
    datetime time;
 };
 
-DisplacementState
-DisplacementData[ACTIVE_SCAN_TIMEFRAMES];
+//----------------------------------------------------
+// Displacement Helpers
+//----------------------------------------------------
+
+int DisplacementStartBar(
+   ENUM_TIMEFRAMES tf)
+{
+   int idx=
+      StructureIndex(tf);
+
+   if(idx<0)
+      return -1;
+
+   return
+      DisplacementData[idx]
+      .startBar;
+}
+
+//----------------------------------------------------
+
+int DisplacementEndBar(
+   ENUM_TIMEFRAMES tf)
+{
+   int idx=
+      StructureIndex(tf);
+
+   if(idx<0)
+      return -1;
+
+   return
+      DisplacementData[idx]
+      .endBar;
+}
+
+//----------------------------------------------------
+
+int DisplacementBar(
+   ENUM_TIMEFRAMES tf)
+{
+   int idx=
+      StructureIndex(tf);
+
+   if(idx<0)
+      return -1;
+
+   return
+      DisplacementData[idx]
+      .displacementBar;
+}
+
 
 //----------------------------------------------------
 // Reset
@@ -4179,25 +4239,33 @@ bool InEquilibrium(
 }
 
 
-
 //====================================================
 // SECTION 18 - INSTITUTIONAL ORDER BLOCK ENGINE
 //====================================================
 
-enum ENUM_OB_DIRECTION
-{
-   OB_NONE = 0,
+//----------------------------------------------------
+// Inputs
+//----------------------------------------------------
 
-   OB_BULLISH,
+input bool RequireOrderBlock=true;
 
-   OB_BEARISH
-};
+input double MaximumOrderBlockATR=2.0;
+
+input double MinimumOrderBlockBodyPercent=50.0;
+
+input bool RequireFVGAfterOrderBlock=true;
+
+//----------------------------------------------------
+// Order Block
+//----------------------------------------------------
 
 struct OrderBlock
 {
    bool valid;
 
-   ENUM_OB_DIRECTION direction;
+   bool confirmed;
+
+   ENUM_DIRECTION direction;
 
    double high;
 
@@ -4205,231 +4273,438 @@ struct OrderBlock
 
    double midpoint;
 
-   datetime created;
+   double size;
+
+   double score;
+
+   datetime creationTime;
+
+   int creationBar;
+
+   int displacementBar;
 
    bool mitigated;
 
-   int touches;
+   bool invalidated;
 
-   double displacementScore;
-
-   double fvgScore;
-
-   double score;
+   int touchCount;
 };
 
-OrderBlock CurrentOrderBlock;
-
-input bool EnableOrderBlockFilter = true;
-
-input int MinimumOrderBlockScore = 75;
-
+OrderBlock
+OrderBlockData[ACTIVE_SCAN_TIMEFRAMES];
 
 //----------------------------------------------------
+// Reset Order Block
+//----------------------------------------------------
 
-void ResetOrderBlock()
+void ResetOrderBlock(
+   ENUM_TIMEFRAMES tf)
 {
-   ZeroMemory(CurrentOrderBlock);
+   int idx=
+      StructureIndex(tf);
 
-   CurrentOrderBlock.direction =
-      OB_NONE;
+   if(idx<0)
+      return;
+
+   ZeroMemory(
+      OrderBlockData[idx]);
 }
 
 //----------------------------------------------------
+// Order Block Size
+//----------------------------------------------------
 
-bool DetectBullishOrderBlock()
+bool ValidOrderBlockSize(
+   ENUM_TIMEFRAMES tf,
+   double high,
+   double low)
 {
-   ResetOrderBlock();
+   double atr=
+      GetATR(tf);
 
-   for(int i=2;i<=8;i++)
+   if(atr<=0)
+      return false;
+
+   return
+      MathAbs(high-low)
+      <=
+      atr*
+      MaximumOrderBlockATR;
+}
+
+//----------------------------------------------------
+// Strong Body
+//----------------------------------------------------
+
+bool StrongOrderBlockBody(
+   ENUM_TIMEFRAMES tf,
+   int bar)
+{
+   return
+      CandleBodyPercent(
+         tf,
+         bar)
+      >=
+      MinimumOrderBlockBodyPercent;
+}
+
+
+//----------------------------------------------------
+// Bullish Order Block
+//----------------------------------------------------
+
+bool BullishOrderBlock(
+   ENUM_TIMEFRAMES tf,
+   int bar,
+   double &high,
+   double &low)
+{
+   if(iClose(_Symbol,tf,bar)
+      >=
+      iOpen(_Symbol,tf,bar))
+      return false;
+
+   high=
+      iHigh(_Symbol,tf,bar);
+
+   low=
+      iLow(_Symbol,tf,bar);
+
+   if(!ValidOrderBlockSize(
+      tf,
+      high,
+      low))
+      return false;
+
+   if(!StrongOrderBlockBody(
+      tf,
+      bar))
+      return false;
+
+   return true;
+}
+
+//----------------------------------------------------
+// Bearish Order Block
+//----------------------------------------------------
+
+bool BearishOrderBlock(
+   ENUM_TIMEFRAMES tf,
+   int bar,
+   double &high,
+   double &low)
+{
+   if(iClose(_Symbol,tf,bar)
+      <=
+      iOpen(_Symbol,tf,bar))
+      return false;
+
+   high=
+      iHigh(_Symbol,tf,bar);
+
+   low=
+      iLow(_Symbol,tf,bar);
+
+   if(!ValidOrderBlockSize(
+      tf,
+      high,
+      low))
+      return false;
+
+   if(!StrongOrderBlockBody(
+      tf,
+      bar))
+      return false;
+
+   return true;
+}
+
+//----------------------------------------------------
+// Detect Institutional Order Block
+//----------------------------------------------------
+
+bool DetectOrderBlock(
+   ENUM_TIMEFRAMES tf)
+{
+   int idx=
+      StructureIndex(tf);
+
+   if(idx<0)
+      return false;
+
+   ResetOrderBlock(tf);
+
+   //-----------------------------------------
+   // Must have confirmed displacement
+   //-----------------------------------------
+
+   if(!DisplacementConfirmed(tf))
+      return false;
+
+   //-----------------------------------------
+   // Must have confirmed FVG
+   //-----------------------------------------
+
+   if(RequireFVGAfterOrderBlock)
    {
-      if(IsBearishCandle(i))
+      if(!FVGData[idx].valid)
+         return false;
+   }
+
+   double high,low;
+
+   double bestScore=-1.0;
+
+   double bestHigh=0.0;
+   double bestLow=0.0;
+
+   int bestBar=-1;
+
+   //-----------------------------------------
+   // Search before displacement
+   //-----------------------------------------
+
+   for(int bar=2; bar<=8; bar++)
+   {
+      //--------------------------------------
+      // Bullish
+      //--------------------------------------
+
+      if(StructureDirection(tf)
+         ==
+         DIRECTION_BULLISH)
       {
-         if(iClose(_Symbol,PERIOD_CURRENT,i-1)>
-            iHigh(_Symbol,PERIOD_CURRENT,i))
+         if(BullishOrderBlock(
+            tf,
+            bar,
+            high,
+            low))
          {
-            CurrentOrderBlock.valid=true;
+            double score=
+               CalculateOrderBlockScore(
+                  tf,
+                  high,
+                  low,
+                  bar);
 
-            CurrentOrderBlock.direction=
-               OB_BULLISH;
+            if(score>bestScore)
+            {
+               bestScore=score;
 
-            CurrentOrderBlock.high=
-               iHigh(_Symbol,PERIOD_CURRENT,i);
+               bestHigh=high;
+               bestLow=low;
 
-            CurrentOrderBlock.low=
-               iLow(_Symbol,PERIOD_CURRENT,i);
+               bestBar=bar;
+            }
+         }
+      }
 
-            CurrentOrderBlock.midpoint=
-               (CurrentOrderBlock.high+
-               CurrentOrderBlock.low)/2.0;
+      //--------------------------------------
+      // Bearish
+      //--------------------------------------
 
-            CurrentOrderBlock.created=
-               iTime(_Symbol,PERIOD_CURRENT,i);
+      if(StructureDirection(tf)
+         ==
+         DIRECTION_BEARISH)
+      {
+         if(BearishOrderBlock(
+            tf,
+            bar,
+            high,
+            low))
+         {
+            double score=
+               CalculateOrderBlockScore(
+                  tf,
+                  high,
+                  low,
+                  bar);
 
-            return true;
+            if(score>bestScore)
+            {
+               bestScore=score;
+
+               bestHigh=high;
+               bestLow=low;
+
+               bestBar=bar;
+            }
          }
       }
    }
 
-   return false;
+   if(bestBar==-1)
+      return false;
+
+   //-----------------------------------------
+   // Save Order Block
+   //-----------------------------------------
+
+   OrderBlockData[idx].valid=true;
+
+   OrderBlockData[idx].confirmed=true;
+
+   OrderBlockData[idx].direction=
+      StructureDirection(tf);
+
+   OrderBlockData[idx].high=
+      bestHigh;
+
+   OrderBlockData[idx].low=
+      bestLow;
+
+   OrderBlockData[idx].midpoint=
+      (bestHigh+bestLow)/2.0;
+
+   OrderBlockData[idx].size=
+      MathAbs(bestHigh-bestLow);
+
+   OrderBlockData[idx].creationBar=
+      bestBar;
+
+   OrderBlockData[idx].displacementBar=1;
+
+   OrderBlockData[idx].creationTime=
+      iTime(_Symbol,tf,bestBar);
+
+   OrderBlockData[idx].score=
+      bestScore;
+
+   return true;
 }
 
 //----------------------------------------------------
+// Order Block Score
+//----------------------------------------------------
 
-bool DetectBearishOrderBlock()
+double CalculateOrderBlockScore(
+   ENUM_TIMEFRAMES tf,
+   double high,
+   double low,
+   int bar)
 {
-   ResetOrderBlock();
+   double score=0.0;
 
-   for(int i=2;i<=8;i++)
+   //-----------------------------------------
+   // Body Strength
+   //-----------------------------------------
+
+   score+=
+      CandleBodyPercent(
+         tf,
+         bar)
+      *0.30;
+
+   //-----------------------------------------
+   // Close Strength
+   //-----------------------------------------
+
+   score+=
+      CandleClosePercent(
+         tf,
+         bar)
+      *0.20;
+
+   //-----------------------------------------
+   // Freshness
+   //-----------------------------------------
+
+   score+=
+      MathMax(
+         20-(bar*2),
+         0);
+
+   //-----------------------------------------
+   // Size
+   //-----------------------------------------
+
+   double atr=
+      GetATR(tf);
+
+   if(atr>0)
    {
-      if(IsBullishCandle(i))
-      {
-         if(iClose(_Symbol,PERIOD_CURRENT,i-1)<
-            iLow(_Symbol,PERIOD_CURRENT,i))
-         {
-            CurrentOrderBlock.valid=true;
-
-            CurrentOrderBlock.direction=
-               OB_BEARISH;
-
-            CurrentOrderBlock.high=
-               iHigh(_Symbol,PERIOD_CURRENT,i);
-
-            CurrentOrderBlock.low=
-               iLow(_Symbol,PERIOD_CURRENT,i);
-
-            CurrentOrderBlock.midpoint=
-               (CurrentOrderBlock.high+
-               CurrentOrderBlock.low)/2.0;
-
-            CurrentOrderBlock.created=
-               iTime(_Symbol,PERIOD_CURRENT,i);
-
-            return true;
-         }
-      }
+      score+=
+      MathMin(
+         (MathAbs(high-low)/atr)
+         *30,
+         30);
    }
 
-   return false;
+   return
+      MathMin(score,100.0);
 }
 
 //----------------------------------------------------
+// Update Order Block
+//----------------------------------------------------
 
-double OrderBlockFreshnessScore()
+void UpdateOrderBlock(
+   ENUM_TIMEFRAMES tf)
 {
-   int bars=
-      iBarShift(
+   int idx=
+      StructureIndex(tf);
+
+   if(idx<0)
+      return;
+
+   if(!OrderBlockData[idx].valid)
+      return;
+
+   double price=
+      SymbolInfoDouble(
          _Symbol,
-         PERIOD_CURRENT,
-         CurrentOrderBlock.created);
+         SYMBOL_BID);
 
-   if(bars<=5)
-      return 25;
+   //--------------------------------------
 
-   if(bars<=10)
-      return 20;
-
-   if(bars<=20)
-      return 15;
-
-   return 5;
-}
-
-//----------------------------------------------------
-
-double OrderBlockTouchScore()
-{
-   if(CurrentOrderBlock.touches==0)
-      return 20;
-
-   if(CurrentOrderBlock.touches==1)
-      return 15;
-
-   if(CurrentOrderBlock.touches==2)
-      return 10;
-
-   return 0;
-}
-
-
-//----------------------------------------------------
-
-double OrderBlockConfluenceScore()
-{
-   double score=0;
-
-   score+=CurrentDisplacementScore*0.25;
-
-   if(CurrentFVG.valid)
-      score+=20;
-
-   if(IsBullishLiquiditySweep()||
-      IsBearishLiquiditySweep())
-      score+=15;
-
-   return MathMin(score,40.0);
-}
-
-
-//----------------------------------------------------
-
-double CalculateOrderBlockScore()
-{
-   double score=0;
-
-   score+=OrderBlockFreshnessScore();
-
-   score+=OrderBlockTouchScore();
-
-   score+=OrderBlockConfluenceScore();
-
-   return MathMin(score,100.0);
-}
-
-
-//----------------------------------------------------
-
-void UpdateOrderBlock()
-{
-   ResetOrderBlock();
-
-   if(DetectBullishOrderBlock() ||
-      DetectBearishOrderBlock())
+   if(price<=OrderBlockData[idx].high &&
+      price>=OrderBlockData[idx].low)
    {
-      CurrentOrderBlock.displacementScore=
-         CurrentDisplacementScore;
+      OrderBlockData[idx].mitigated=true;
 
-      CurrentOrderBlock.fvgScore=
-         CurrentFVG.score;
+      OrderBlockData[idx].touchCount++;
+   }
 
-      CurrentOrderBlock.score=
-         CalculateOrderBlockScore();
+   //--------------------------------------
+
+   if(StructureDirection(tf)
+      ==
+      DIRECTION_BULLISH)
+   {
+      if(price<
+         OrderBlockData[idx].low)
+      {
+         OrderBlockData[idx].invalidated=true;
+      }
+   }
+   else
+   {
+      if(price>
+         OrderBlockData[idx].high)
+      {
+         OrderBlockData[idx].invalidated=true;
+      }
    }
 }
 
 //----------------------------------------------------
-
-bool ValidBullishOrderBlock()
-{
-   return
-      CurrentOrderBlock.valid &&
-      CurrentOrderBlock.direction==
-      OB_BULLISH &&
-      CurrentOrderBlock.score>=
-      MinimumOrderBlockScore;
-}
-
+// Update Order Block Engine
 //----------------------------------------------------
 
-bool ValidBearishOrderBlock()
+void UpdateOrderBlockEngine()
 {
-   return
-      CurrentOrderBlock.valid &&
-      CurrentOrderBlock.direction==
-      OB_BEARISH &&
-      CurrentOrderBlock.score>=
-      MinimumOrderBlockScore;
+   for(int i=0;
+       i<ACTIVE_SCAN_TIMEFRAMES;
+       i++)
+   {
+      DetectOrderBlock(
+         StructureTF[i]);
+
+      UpdateOrderBlock(
+         StructureTF[i]);
+   }
 }
+
 
 
 
