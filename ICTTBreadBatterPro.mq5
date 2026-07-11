@@ -3009,13 +3009,7 @@ bool CHOCHConfirmed(
 }
 
 
-
-
 //====================================================
-// SECTION 15 - INSTITUTIONAL DISPLACEMENT ENGINE
-//====================================================
-
- //====================================================
 // SECTION 15 - INSTITUTIONAL DISPLACEMENT ENGINE
 //====================================================
 
@@ -3167,20 +3161,21 @@ int DisplacementBar(
 }
 
 //----------------------------------------------------
+// Current Stored Displacement Score
+//----------------------------------------------------
 
-double DisplacementScore(
+double StoredDisplacementScore(
    ENUM_TIMEFRAMES tf)
 {
    int idx=
       DisplacementIndex(tf);
 
    if(idx<0)
-      return 0;
+      return 0.0;
 
    return
       DisplacementData[idx].score;
 }
-
 
 //----------------------------------------------------
 // Candle Close Position
@@ -3445,19 +3440,19 @@ bool DetectImpulse(
       MinimumImpulseCandles)
       return false;
 
-   //--------------------------------------
-   // Impulse Leg
-   //--------------------------------------
+  //--------------------------------------
+  // Impulse Leg
+  //--------------------------------------
 
-   startBar=
-      displacementBar;
+  endBar=
+     displacementBar;
 
-   endBar=
-      displacementBar
-      +
-      candles
-      -
-      1;
+  startBar=
+     displacementBar
+     +
+     candles
+     -
+     1;
 
    return true;
 }
@@ -3710,14 +3705,8 @@ void UpdateDisplacementEngine()
 double CurrentDisplacementScore(
    ENUM_TIMEFRAMES tf)
 {
-   int idx=
-      StructureIndex(tf);
-
-   if(idx<0)
-      return 0.0;
-
    return
-      DisplacementData[idx].score;
+      StoredDisplacementScore(tf);
 }
 
 //----------------------------------------------------
