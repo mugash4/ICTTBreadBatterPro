@@ -4931,6 +4931,21 @@ void SaveOrderBlock(
       CandleBodyPercent(
          tf,
          bar);
+  OrderBlockData[idx].score=0.0;
+
+  OrderBlockData[idx].touched=false;
+
+  OrderBlockData[idx].mitigated=false;
+
+  OrderBlockData[idx].rejected=false;
+
+  OrderBlockData[idx].invalidated=false;
+
+  OrderBlockData[idx].touchCount=0;
+
+  OrderBlockData[idx].mitigationCount=0;
+
+  OrderBlockData[idx].firstTouchTime=0;
 }
 
 //----------------------------------------------------
@@ -4945,6 +4960,16 @@ void DetectOrderBlock(
 
    if(idx<0)
       return;
+
+   //--------------------------------------
+   // Keep existing valid Order Block
+   //--------------------------------------
+
+   if(OrderBlockData[idx].confirmed &&
+      !OrderBlockData[idx].invalidated)
+   {
+      return;
+   }
 
    ResetOrderBlock(tf);
 
@@ -5075,10 +5100,16 @@ void DetectOrderBlockMitigation(
             OrderBlockData[idx].firstTouchTime=
                iTime(_Symbol,tf,1);
          }
-         else
-         {
-            OrderBlockData[idx].touchCount++;
-         }
+         else if(
+                iTime(_Symbol,tf,1)
+                !=
+                OrderBlockData[idx].firstTouchTime)
+             {
+              OrderBlockData[idx].touchCount++;
+
+              OrderBlockData[idx].firstTouchTime=
+              iTime(_Symbol,tf,1);
+        }
       }
    }
 
@@ -5099,10 +5130,15 @@ void DetectOrderBlockMitigation(
             OrderBlockData[idx].firstTouchTime=
                iTime(_Symbol,tf,1);
          }
-         else
-         {
-            OrderBlockData[idx].touchCount++;
-         }
+         else if(iTime(_Symbol,tf,1)
+               !=
+               OrderBlockData[idx].firstTouchTime)
+            {
+              OrderBlockData[idx].touchCount++;
+
+              OrderBlockData[idx].firstTouchTime=
+              iTime(_Symbol,tf,1);
+            }
       }
    }
 }
