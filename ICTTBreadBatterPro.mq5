@@ -5257,235 +5257,1349 @@ bool OrderBlockInvalidated(
 }
 
 
-
 //====================================================
-// SECTION 19 - ORDER BLOCK DATABASE ENGINE
+// SECTION 19 - ICT LIQUIDITY ENGINE
 //====================================================
-
-#define MAX_ORDERBLOCKS 100
-
-OrderBlock OrderBlockDatabase[MAX_ORDERBLOCKS];
-
-int TotalOrderBlocks = 0;
 
 //----------------------------------------------------
+// Inputs
+//----------------------------------------------------
 
-void ResetOrderBlockDatabase()
+input bool EnableLiquidityEngine=true;
+
+input int LiquidityScanDepth=500;
+
+input int MaximumLiquidityRecords=300;
+
+input bool EnableOldLiquidity=true;
+
+input bool EnableEqualLiquidity=true;
+
+input bool EnableSwingLiquidity=true;
+
+input double EqualLiquidityToleranceATR=0.10;
+
+input double MinimumSweepWickPercent=50.0;
+
+input double MinimumSweepClosePercent=60.0;
+
+//----------------------------------------------------
+// Liquidity Types
+//----------------------------------------------------
+
+enum ENUM_LIQUIDITY_TYPE
 {
-   TotalOrderBlocks = 0;
+   LIQUIDITY_NONE=0,
 
-   for(int i=0;i<MAX_ORDERBLOCKS;i++)
-      ZeroMemory(OrderBlockDatabase[i]);
+   LIQUIDITY_OLD_HIGH,
+   LIQUIDITY_OLD_LOW,
+
+   LIQUIDITY_EQUAL_HIGH,
+   LIQUIDITY_EQUAL_LOW,
+
+   LIQUIDITY_SWING_HIGH,
+   LIQUIDITY_SWING_LOW
+};
+
+//----------------------------------------------------
+// Sweep Status
+//----------------------------------------------------
+
+enum ENUM_SWEEP_STATUS
+{
+   SWEEP_NONE=0,
+
+   SWEEP_PENDING,
+
+   SWEEP_CONFIRMED,
+
+   SWEEP_INVALID
+};
+
+//----------------------------------------------------
+// Liquidity State
+//----------------------------------------------------
+
+struct LiquidityState
+{
+   bool active;
+
+   bool valid;
+
+   bool mitigated;
+
+   bool swept;
+
+   bool watchCreated;
+
+   ENUM_TIMEFRAMES timeframe;
+
+   ENUM_LIQUIDITY_TYPE type;
+
+   ENUM_SWEEP_STATUS sweepStatus;
+
+   ENUM_DIRECTION expectedDirection;
+
+   int sourceBar;
+
+   int sweepBar;
+
+   datetime sourceTime;
+
+   datetime sweepTime;
+
+   double price;
+
+   double high;
+
+   double low;
+
+   double wickPercent;
+
+   double closePercent;
+
+   double strength;
+
+   double score;
+};
+
+//----------------------------------------------------
+// Liquidity Database
+//----------------------------------------------------
+
+LiquidityState
+LiquidityDatabase[MaximumLiquidityRecords];
+
+//----------------------------------------------------
+// Reset Entire Liquidity Database
+//----------------------------------------------------
+
+void ResetLiquidityDatabase()
+{
+   for(int i=0;
+       i<MaximumLiquidityRecords;
+       i++)
+   {
+      ZeroMemory(
+         LiquidityDatabase[i]);
+   }
 }
 
 //----------------------------------------------------
+// Find Free Database Slot
+//----------------------------------------------------
 
-void AddOrderBlock(OrderBlock ob)
+int FindFreeLiquiditySlot()
 {
-   if(!ob.valid)
+   for(int i=0;
+       i<MaximumLiquidityRecords;
+       i++)
+   {
+      if(!LiquidityDatabase[i].active)
+         return i;
+   }
+
+   return -1;
+}
+
+//----------------------------------------------------
+// Find Existing Liquidity
+//----------------------------------------------------
+
+int FindLiquidityRecord(
+   ENUM_TIMEFRAMES tf,
+   ENUM_LIQUIDITY_TYPE type,
+   double price)
+{
+   double atr=
+      GetATR(tf);
+
+   if(atr<=0)
+      atr=SymbolInfoDouble(
+         _Symbol,
+         SYMBOL_POINT);
+
+   double tolerance=
+      atr*
+      EqualLiquidityToleranceATR;
+
+   for(int i=0;
+       i<MaximumLiquidityRecords;
+       i++)
+   {
+      if(!LiquidityDatabase[i].active)
+         continue;
+
+      if(LiquidityDatabase[i].timeframe!=tf)
+         continue;
+
+      if(LiquidityDatabase[i].type!=type)
+         continue;
+
+      if(MathAbs(
+         LiquidityDatabase[i].price
+         -
+         price)
+         <=
+         tolerance)
+      {
+         return i;
+      }
+   }
+
+   return -1;
+}
+
+//----------------------------------------------------
+// Liquidity Already Exists
+//----------------------------------------------------
+
+bool LiquidityExists(
+   ENUM_TIMEFRAMES tf,
+   ENUM_LIQUIDITY_TYPE type,
+   double price)
+{
+   return
+      FindLiquidityRecord(
+         tf,
+         type,
+         price)
+      >=0;
+}
+
+//----------------------------------------------------
+// Remove Liquidity Record
+//----------------------------------------------------
+
+void RemoveLiquidityRecord(
+   int index)
+{
+   if(index<0)
       return;
 
-   if(TotalOrderBlocks >= MAX_ORDERBLOCKS)
-   {
-      for(int i=1;i<MAX_ORDERBLOCKS;i++)
-         OrderBlockDatabase[i-1] =
-            OrderBlockDatabase[i];
+   if(index>=MaximumLiquidityRecords)
+      return;
 
-      TotalOrderBlocks =
-         MAX_ORDERBLOCKS-1;
-   }
-
-   OrderBlockDatabase[TotalOrderBlocks] = ob;
-
-   TotalOrderBlocks++;
+   ZeroMemory(
+      LiquidityDatabase[index]);
 }
 
 //----------------------------------------------------
+// Count Active Liquidity
+//----------------------------------------------------
 
-void UpdateOrderBlockTouches()
+int ActiveLiquidityCount()
 {
-   double bid =
-      SymbolInfoDouble(
-         _Symbol,
-         SYMBOL_BID);
+   int count=0;
 
-   for(int i=0;i<TotalOrderBlocks;i++)
+   for(int i=0;
+       i<MaximumLiquidityRecords;
+       i++)
    {
-      if(!OrderBlockDatabase[i].valid)
+      if(LiquidityDatabase[i].active)
+         count++;
+   }
+
+   return count;
+}
+
+//----------------------------------------------------
+// Remove Mitigated Liquidity
+//----------------------------------------------------
+
+void CleanLiquidityDatabase()
+{
+   for(int i=0;
+       i<MaximumLiquidityRecords;
+       i++)
+   {
+      if(!LiquidityDatabase[i].active)
          continue;
 
-      if(bid >= OrderBlockDatabase[i].low &&
-         bid <= OrderBlockDatabase[i].high)
+      if(LiquidityDatabase[i].mitigated)
       {
-         OrderBlockDatabase[i].touches++;
+         RemoveLiquidityRecord(i);
       }
    }
 }
 
 //----------------------------------------------------
-
-void UpdateOrderBlockMitigation()
-{
-   double bid =
-      SymbolInfoDouble(
-         _Symbol,
-         SYMBOL_BID);
-
-   for(int i=0;i<TotalOrderBlocks;i++)
-   {
-      if(!OrderBlockDatabase[i].valid)
-         continue;
-
-      if(OrderBlockDatabase[i].direction ==
-         OB_BULLISH)
-      {
-         if(bid <
-            OrderBlockDatabase[i].low)
-         {
-            OrderBlockDatabase[i].mitigated = true;
-         }
-      }
-
-      if(OrderBlockDatabase[i].direction ==
-         OB_BEARISH)
-      {
-         if(bid >
-            OrderBlockDatabase[i].high)
-         {
-            OrderBlockDatabase[i].mitigated = true;
-         }
-      }
-   }
-}
-
+// Save Liquidity Record
 //----------------------------------------------------
 
-void RemoveMitigatedOrderBlocks()
+bool SaveLiquidityRecord(
+   ENUM_TIMEFRAMES tf,
+   ENUM_LIQUIDITY_TYPE type,
+   ENUM_DIRECTION expectedDirection,
+   int sourceBar,
+   double price)
 {
-   for(int i=0;i<TotalOrderBlocks;)
-   {
-      if(OrderBlockDatabase[i].mitigated)
-      {
-         for(int j=i+1;j<TotalOrderBlocks;j++)
-            OrderBlockDatabase[j-1] =
-               OrderBlockDatabase[j];
+   //--------------------------------------
+   // Prevent Duplicates
+   //--------------------------------------
 
-         TotalOrderBlocks--;
-
-         continue;
-      }
-
-      i++;
-   }
-}
-
-//----------------------------------------------------
-
-int BestBullishOrderBlock()
-{
-   int index = -1;
-
-   double bestScore = -1;
-
-   for(int i=0;i<TotalOrderBlocks;i++)
-   {
-      if(!OrderBlockDatabase[i].valid)
-         continue;
-
-      if(OrderBlockDatabase[i].direction !=
-         OB_BULLISH)
-         continue;
-
-      if(OrderBlockDatabase[i].score >
-         bestScore)
-      {
-         bestScore =
-            OrderBlockDatabase[i].score;
-
-         index = i;
-      }
-   }
-
-   return index;
-}
-
-//----------------------------------------------------
-
-int BestBearishOrderBlock()
-{
-   int index = -1;
-
-   double bestScore = -1;
-
-   for(int i=0;i<TotalOrderBlocks;i++)
-   {
-      if(!OrderBlockDatabase[i].valid)
-         continue;
-
-      if(OrderBlockDatabase[i].direction !=
-         OB_BEARISH)
-         continue;
-
-      if(OrderBlockDatabase[i].score >
-         bestScore)
-      {
-         bestScore =
-            OrderBlockDatabase[i].score;
-
-         index = i;
-      }
-   }
-
-   return index;
-}
-
-//----------------------------------------------------
-
-bool SelectBestBullishOrderBlock()
-{
-   int idx =
-      BestBullishOrderBlock();
-
-   if(idx < 0)
+   if(LiquidityExists(
+      tf,
+      type,
+      price))
       return false;
 
-   CurrentOrderBlock =
-      OrderBlockDatabase[idx];
+   //--------------------------------------
+   // Find Free Slot
+   //--------------------------------------
+
+   int slot=
+      FindFreeLiquiditySlot();
+
+   if(slot<0)
+      return false;
+
+   //--------------------------------------
+   // Populate Record
+   //--------------------------------------
+
+   LiquidityDatabase[slot].active=true;
+
+   LiquidityDatabase[slot].valid=true;
+
+   LiquidityDatabase[slot].mitigated=false;
+
+   LiquidityDatabase[slot].swept=false;
+
+   LiquidityDatabase[slot].watchCreated=false;
+
+   LiquidityDatabase[slot].timeframe=tf;
+
+   LiquidityDatabase[slot].type=type;
+
+   LiquidityDatabase[slot].expectedDirection=
+      expectedDirection;
+
+   LiquidityDatabase[slot].sweepStatus=
+      SWEEP_PENDING;
+
+   LiquidityDatabase[slot].sourceBar=
+      sourceBar;
+
+   LiquidityDatabase[slot].sourceTime=
+      iTime(
+         _Symbol,
+         tf,
+         sourceBar);
+
+   LiquidityDatabase[slot].price=
+      price;
+
+   LiquidityDatabase[slot].high=
+      iHigh(
+         _Symbol,
+         tf,
+         sourceBar);
+
+   LiquidityDatabase[slot].low=
+      iLow(
+         _Symbol,
+         tf,
+         sourceBar);
+
+   LiquidityDatabase[slot].strength=1.0;
+
+   LiquidityDatabase[slot].score=0.0;
 
    return true;
 }
 
 //----------------------------------------------------
+// Mark Liquidity Mitigated
+//----------------------------------------------------
 
-bool SelectBestBearishOrderBlock()
+void MarkLiquidityMitigated(
+   int index)
 {
-   int idx =
-      BestBearishOrderBlock();
+   if(index<0)
+      return;
 
-   if(idx < 0)
+   if(index>=MaximumLiquidityRecords)
+      return;
+
+   LiquidityDatabase[index]
+      .mitigated=true;
+}
+
+//----------------------------------------------------
+// Mark Liquidity Swept
+//----------------------------------------------------
+
+void MarkLiquiditySwept(
+   int index,
+   int sweepBar)
+{
+   if(index<0)
+      return;
+
+   if(index>=MaximumLiquidityRecords)
+      return;
+
+   LiquidityDatabase[index]
+      .swept=true;
+
+   LiquidityDatabase[index]
+      .sweepBar=
+      sweepBar;
+
+   LiquidityDatabase[index]
+      .sweepTime=
+      iTime(
+         _Symbol,
+         LiquidityDatabase[index]
+         .timeframe,
+         sweepBar);
+
+   LiquidityDatabase[index]
+      .sweepStatus=
+      SWEEP_CONFIRMED;
+}
+
+//----------------------------------------------------
+// Active Liquidity
+//----------------------------------------------------
+
+bool LiquidityActive(
+   int index)
+{
+   if(index<0)
       return false;
 
-   CurrentOrderBlock =
-      OrderBlockDatabase[idx];
+   if(index>=MaximumLiquidityRecords)
+      return false;
+
+   return
+      LiquidityDatabase[index]
+      .active;
+}
+
+//----------------------------------------------------
+// Valid Liquidity
+//----------------------------------------------------
+
+bool ValidLiquidity(
+   int index)
+{
+   if(!LiquidityActive(index))
+      return false;
+
+   if(LiquidityDatabase[index]
+      .mitigated)
+      return false;
+
+   return
+      LiquidityDatabase[index]
+      .valid;
+}
+
+//----------------------------------------------------
+// Detect Old High Liquidity
+//----------------------------------------------------
+
+void DetectOldHighLiquidity(
+   ENUM_TIMEFRAMES tf)
+{
+   if(!EnableOldLiquidity)
+      return;
+
+   int bars=
+      MathMin(
+         LiquidityScanDepth,
+         Bars(_Symbol,tf)-5);
+
+   for(int bar=bars;
+       bar>=5;
+       bar--)
+   {
+      if(!IsSwingHigh(tf,bar))
+         continue;
+
+      SaveLiquidityRecord(
+         tf,
+         LIQUIDITY_OLD_HIGH,
+         DIRECTION_BEARISH,
+         bar,
+         iHigh(_Symbol,tf,bar));
+   }
+}
+
+//----------------------------------------------------
+// Detect Old Low Liquidity
+//----------------------------------------------------
+
+void DetectOldLowLiquidity(
+   ENUM_TIMEFRAMES tf)
+{
+   if(!EnableOldLiquidity)
+      return;
+
+   int bars=
+      MathMin(
+         LiquidityScanDepth,
+         Bars(_Symbol,tf)-5);
+
+   for(int bar=bars;
+       bar>=5;
+       bar--)
+   {
+      if(!IsSwingLow(tf,bar))
+         continue;
+
+      SaveLiquidityRecord(
+         tf,
+         LIQUIDITY_OLD_LOW,
+         DIRECTION_BULLISH,
+         bar,
+         iLow(_Symbol,tf,bar));
+   }
+}
+
+//----------------------------------------------------
+// Detect Old Liquidity
+//----------------------------------------------------
+
+void DetectOldLiquidity(
+   ENUM_TIMEFRAMES tf)
+{
+   DetectOldHighLiquidity(tf);
+
+   DetectOldLowLiquidity(tf);
+}
+
+//----------------------------------------------------
+// Equal High
+//----------------------------------------------------
+
+bool IsEqualHigh(
+   ENUM_TIMEFRAMES tf,
+   int bar1,
+   int bar2)
+{
+   double atr=
+      GetATR(tf);
+
+   if(atr<=0)
+      return false;
+
+   double tolerance=
+      atr*
+      EqualLiquidityToleranceATR;
+
+   return
+      MathAbs(
+         iHigh(_Symbol,tf,bar1)
+         -
+         iHigh(_Symbol,tf,bar2))
+      <=
+      tolerance;
+}
+
+//----------------------------------------------------
+// Equal Low
+//----------------------------------------------------
+
+bool IsEqualLow(
+   ENUM_TIMEFRAMES tf,
+   int bar1,
+   int bar2)
+{
+   double atr=
+      GetATR(tf);
+
+   if(atr<=0)
+      return false;
+
+   double tolerance=
+      atr*
+      EqualLiquidityToleranceATR;
+
+   return
+      MathAbs(
+         iLow(_Symbol,tf,bar1)
+         -
+         iLow(_Symbol,tf,bar2))
+      <=
+      tolerance;
+}
+
+//----------------------------------------------------
+// Detect Equal High Liquidity
+//----------------------------------------------------
+
+void DetectEqualHighLiquidity(
+   ENUM_TIMEFRAMES tf)
+{
+   if(!EnableEqualLiquidity)
+      return;
+
+   int bars=
+      MathMin(
+         LiquidityScanDepth,
+         Bars(_Symbol,tf)-5);
+
+   for(int bar=bars;
+       bar>=10;
+       bar--)
+   {
+      if(!IsSwingHigh(tf,bar))
+         continue;
+
+      for(int compare=bar-2;
+          compare>=5;
+          compare--)
+      {
+         if(!IsSwingHigh(tf,compare))
+            continue;
+
+         if(IsEqualHigh(
+            tf,
+            bar,
+            compare))
+         {
+            SaveLiquidityRecord(
+               tf,
+               LIQUIDITY_EQUAL_HIGH,
+               DIRECTION_BEARISH,
+               bar,
+               iHigh(_Symbol,tf,bar));
+
+            break;
+         }
+      }
+   }
+}
+
+//----------------------------------------------------
+// Detect Equal Low Liquidity
+//----------------------------------------------------
+
+void DetectEqualLowLiquidity(
+   ENUM_TIMEFRAMES tf)
+{
+   if(!EnableEqualLiquidity)
+      return;
+
+   int bars=
+      MathMin(
+         LiquidityScanDepth,
+         Bars(_Symbol,tf)-5);
+
+   for(int bar=bars;
+       bar>=10;
+       bar--)
+   {
+      if(!IsSwingLow(tf,bar))
+         continue;
+
+      for(int compare=bar-2;
+          compare>=5;
+          compare--)
+      {
+         if(!IsSwingLow(tf,compare))
+            continue;
+
+         if(IsEqualLow(
+            tf,
+            bar,
+            compare))
+         {
+            SaveLiquidityRecord(
+               tf,
+               LIQUIDITY_EQUAL_LOW,
+               DIRECTION_BULLISH,
+               bar,
+               iLow(_Symbol,tf,bar));
+
+            break;
+         }
+      }
+   }
+}
+
+//----------------------------------------------------
+// Detect Equal Liquidity
+//----------------------------------------------------
+
+void DetectEqualLiquidity(
+   ENUM_TIMEFRAMES tf)
+{
+   DetectEqualHighLiquidity(tf);
+
+   DetectEqualLowLiquidity(tf);
+}
+
+//----------------------------------------------------
+// Scan One Timeframe
+//----------------------------------------------------
+
+void ScanLiquidityTimeframe(
+   ENUM_TIMEFRAMES tf)
+{
+   //--------------------------------------
+   // Old Highs / Old Lows
+   //--------------------------------------
+
+   DetectOldLiquidity(tf);
+
+   //--------------------------------------
+   // Equal Highs / Equal Lows
+   //--------------------------------------
+
+   DetectEqualLiquidity(tf);
+
+   //--------------------------------------
+   // Remove Mitigated Levels
+   //--------------------------------------
+
+   CleanLiquidityDatabase();
+}
+
+//----------------------------------------------------
+// Build Liquidity Database
+//----------------------------------------------------
+
+void BuildLiquidityDatabase()
+{
+   if(!EnableLiquidityEngine)
+      return;
+
+   for(int i=0;
+       i<ACTIVE_SCAN_TIMEFRAMES;
+       i++)
+   {
+      ScanLiquidityTimeframe(
+         StructureTF[i]);
+   }
+}
+
+//----------------------------------------------------
+// Update Liquidity Database
+//----------------------------------------------------
+
+void UpdateLiquidityDatabase()
+{
+   if(!EnableLiquidityEngine)
+      return;
+
+   BuildLiquidityDatabase();
+}
+
+//----------------------------------------------------
+// Active Liquidity Records
+//----------------------------------------------------
+
+int TotalLiquidityRecords()
+{
+   return
+      ActiveLiquidityCount();
+}
+
+//----------------------------------------------------
+// Sweep Wick Quality
+//----------------------------------------------------
+
+double SweepWickPercent(
+   ENUM_TIMEFRAMES tf,
+   int bar,
+   ENUM_DIRECTION direction)
+{
+   double high=iHigh(_Symbol,tf,bar);
+   double low=iLow(_Symbol,tf,bar);
+   double open=iOpen(_Symbol,tf,bar);
+   double close=iClose(_Symbol,tf,bar);
+
+   double range=high-low;
+
+   if(range<=0)
+      return 0.0;
+
+   //--------------------------------------
+   // Buy-side Liquidity
+   //--------------------------------------
+
+   if(direction==DIRECTION_BEARISH)
+   {
+      return
+         ((high-
+         MathMax(open,close))
+         /range)
+         *100.0;
+   }
+
+   //--------------------------------------
+   // Sell-side Liquidity
+   //--------------------------------------
+
+   return
+      ((MathMin(open,close)
+      -low)
+      /range)
+      *100.0;
+}
+
+//----------------------------------------------------
+// Sweep Close Quality
+//----------------------------------------------------
+
+bool ValidSweepClose(
+   ENUM_TIMEFRAMES tf,
+   int bar,
+   ENUM_DIRECTION direction)
+{
+   double high=iHigh(_Symbol,tf,bar);
+   double low=iLow(_Symbol,tf,bar);
+   double close=iClose(_Symbol,tf,bar);
+
+   double range=high-low;
+
+   if(range<=0)
+      return false;
+
+   //--------------------------------------
+   // Buy-side Sweep
+   //--------------------------------------
+
+   if(direction==DIRECTION_BEARISH)
+   {
+      double percent=
+         ((high-close)
+         /range)
+         *100.0;
+
+      return
+         percent>=
+         MinimumSweepClosePercent;
+   }
+
+   //--------------------------------------
+   // Sell-side Sweep
+   //--------------------------------------
+
+   double percent=
+      ((close-low)
+      /range)
+      *100.0;
+
+   return
+      percent>=
+      MinimumSweepClosePercent;
+}
+
+//----------------------------------------------------
+// Detect Liquidity Sweep
+//----------------------------------------------------
+
+void DetectLiquiditySweep()
+{
+   for(int i=0;
+       i<MaximumLiquidityRecords;
+       i++)
+   {
+      if(!ValidLiquidity(i))
+         continue;
+
+      if(LiquidityDatabase[i].swept)
+         continue;
+
+      ENUM_TIMEFRAMES tf=
+         LiquidityDatabase[i].timeframe;
+
+      double high=
+         iHigh(_Symbol,tf,1);
+
+      double low=
+         iLow(_Symbol,tf,1);
+
+      bool swept=false;
+
+      //--------------------------------------
+      // Buy-side Liquidity
+      //--------------------------------------
+
+      if(LiquidityDatabase[i]
+         .expectedDirection
+         ==
+         DIRECTION_BEARISH)
+      {
+         swept=
+            high>
+            LiquidityDatabase[i]
+            .price;
+      }
+
+      //--------------------------------------
+      // Sell-side Liquidity
+      //--------------------------------------
+
+      else
+      {
+         swept=
+            low<
+            LiquidityDatabase[i]
+            .price;
+      }
+
+      if(!swept)
+         continue;
+
+      //--------------------------------------
+      // Wick Quality
+      //--------------------------------------
+
+      double wick=
+         SweepWickPercent(
+            tf,
+            1,
+            LiquidityDatabase[i]
+            .expectedDirection);
+
+      if(wick<
+         MinimumSweepWickPercent)
+         continue;
+
+      //--------------------------------------
+      // Close Quality
+      //--------------------------------------
+
+      if(!ValidSweepClose(
+         tf,
+         1,
+         LiquidityDatabase[i]
+         .expectedDirection))
+      {
+         continue;
+      }
+
+      //--------------------------------------
+      // Confirm Sweep
+      //--------------------------------------
+
+      MarkLiquiditySwept(
+         i,
+         1);
+
+      StartPatternMonitoring(
+         i);
+   }
+}
+
+//----------------------------------------------------
+// ICT Pattern Stages
+//----------------------------------------------------
+
+enum ENUM_PATTERN_STAGE
+{
+   PATTERN_NONE=0,
+
+   PATTERN_WAITING_MSS,
+
+   PATTERN_WAITING_DISPLACEMENT,
+
+   PATTERN_WAITING_FVG,
+
+   PATTERN_WAITING_ORDERBLOCK,
+
+   PATTERN_WAITING_RETRACEMENT,
+
+   PATTERN_COMPLETE
+};
+
+//----------------------------------------------------
+// Pattern State
+//----------------------------------------------------
+
+struct PatternState
+{
+   bool active;
+
+   int liquidityIndex;
+
+   ENUM_TIMEFRAMES timeframe;
+
+   ENUM_DIRECTION direction;
+
+   ENUM_PATTERN_STAGE stage;
+
+   datetime startTime;
+
+   datetime lastUpdate;
+
+   bool mssConfirmed;
+
+   bool displacementConfirmed;
+
+   bool fvgConfirmed;
+
+   bool orderBlockConfirmed;
+
+   bool retracementConfirmed;
+
+   double entryPrice;
+
+   double stopLoss;
+
+   double takeProfit;
+};
+
+PatternState
+PatternData[ACTIVE_SCAN_TIMEFRAMES];
+
+//----------------------------------------------------
+// Reset Pattern State
+//----------------------------------------------------
+
+void ResetPatternState(
+   ENUM_TIMEFRAMES tf)
+{
+   int idx=
+      StructureIndex(tf);
+
+   if(idx<0)
+      return;
+
+   ZeroMemory(
+      PatternData[idx]);
+}
+
+//----------------------------------------------------
+// Start ICT Pattern
+//----------------------------------------------------
+
+void StartPatternMonitoring(
+   int liquidityIndex)
+{
+   ENUM_TIMEFRAMES tf=
+      LiquidityDatabase
+      [liquidityIndex]
+      .timeframe;
+
+   int idx=
+      StructureIndex(tf);
+
+   if(idx<0)
+      return;
+
+   PatternData[idx]
+      .active=true;
+
+   PatternData[idx]
+      .liquidityIndex=
+      liquidityIndex;
+
+   PatternData[idx]
+      .timeframe=tf;
+
+   PatternData[idx]
+      .direction=
+      LiquidityDatabase
+      [liquidityIndex]
+      .expectedDirection;
+
+   PatternData[idx]
+      .stage=
+      PATTERN_WAITING_MSS;
+
+   PatternData[idx]
+      .startTime=
+      TimeCurrent();
+
+   PatternData[idx]
+      .lastUpdate=
+      TimeCurrent();
+}
+
+//----------------------------------------------------
+// Confirm MSS
+//----------------------------------------------------
+
+bool ConfirmPatternMSS(
+   ENUM_TIMEFRAMES tf,
+   ENUM_DIRECTION direction)
+{
+   //--------------------------------------
+   // Bullish Pattern
+   //--------------------------------------
+
+   if(direction==DIRECTION_BULLISH)
+   {
+      if(BullishMSSConfirmed(tf))
+         return true;
+   }
+
+   //--------------------------------------
+   // Bearish Pattern
+   //--------------------------------------
+
+   else
+   {
+      if(BearishMSSConfirmed(tf))
+         return true;
+   }
+
+   return false;
+}
+
+//----------------------------------------------------
+// Monitor MSS
+//----------------------------------------------------
+
+void MonitorPatternMSS()
+{
+   for(int i=0;
+       i<ACTIVE_SCAN_TIMEFRAMES;
+       i++)
+   {
+      if(!PatternData[i].active)
+         continue;
+
+      if(PatternData[i].stage
+         !=
+         PATTERN_WAITING_MSS)
+      {
+         continue;
+      }
+
+      //--------------------------------------
+      // MSS Confirmed?
+      //--------------------------------------
+
+      if(!ConfirmPatternMSS(
+         PatternData[i].timeframe,
+         PatternData[i].direction))
+      {
+         continue;
+      }
+
+      //--------------------------------------
+      // Advance Pattern
+      //--------------------------------------
+
+      PatternData[i]
+         .mssConfirmed=true;
+
+      PatternData[i]
+         .stage=
+         PATTERN_WAITING_DISPLACEMENT;
+
+      PatternData[i]
+         .lastUpdate=
+         TimeCurrent();
+   }
+}
+
+//----------------------------------------------------
+// Pattern Waiting For MSS
+//----------------------------------------------------
+
+bool PatternWaitingForMSS(
+   ENUM_TIMEFRAMES tf)
+{
+   int idx=
+      StructureIndex(tf);
+
+   if(idx<0)
+      return false;
+
+   return
+      PatternData[idx].active
+      &&
+      PatternData[idx].stage
+      ==
+      PATTERN_WAITING_MSS;
+}
+
+//----------------------------------------------------
+// Confirm Displacement
+//----------------------------------------------------
+
+bool ConfirmPatternDisplacement(
+   ENUM_TIMEFRAMES tf,
+   ENUM_DIRECTION direction)
+{
+   if(!DisplacementConfirmed(tf))
+      return false;
+
+   if(DisplacementDirection(tf)!=direction)
+      return false;
 
    return true;
 }
 
 //----------------------------------------------------
+// Monitor Displacement
+//----------------------------------------------------
 
-void UpdateOrderBlockDatabase()
+void MonitorPatternDisplacement()
 {
-   UpdateOrderBlock();
+   for(int i=0;
+       i<ACTIVE_SCAN_TIMEFRAMES;
+       i++)
+   {
+      if(!PatternData[i].active)
+         continue;
 
-   if(CurrentOrderBlock.valid)
-      AddOrderBlock(CurrentOrderBlock);
+      if(PatternData[i].stage
+         !=
+         PATTERN_WAITING_DISPLACEMENT)
+      {
+         continue;
+      }
 
-   UpdateOrderBlockTouches();
+      if(!ConfirmPatternDisplacement(
+            PatternData[i].timeframe,
+            PatternData[i].direction))
+      {
+         continue;
+      }
 
-   UpdateOrderBlockMitigation();
+      //--------------------------------------
+      // Advance Pattern
+      //--------------------------------------
 
-   RemoveMitigatedOrderBlocks();
+      PatternData[i]
+         .displacementConfirmed=true;
+
+      PatternData[i]
+         .stage=
+         PATTERN_WAITING_FVG;
+
+      PatternData[i]
+         .lastUpdate=
+         TimeCurrent();
+   }
 }
+
+
+//----------------------------------------------------
+// Pattern Waiting For Displacement
+//----------------------------------------------------
+
+bool PatternWaitingForDisplacement(
+   ENUM_TIMEFRAMES tf)
+{
+   int idx=
+      StructureIndex(tf);
+
+   if(idx<0)
+      return false;
+
+   return
+      PatternData[idx].active
+      &&
+      PatternData[idx].stage
+      ==
+      PATTERN_WAITING_DISPLACEMENT;
+}
+
+//----------------------------------------------------
+// Confirm Fair Value Gap
+//----------------------------------------------------
+
+bool ConfirmPatternFVG(
+   ENUM_TIMEFRAMES tf,
+   ENUM_DIRECTION direction)
+{
+   int idx=
+      StructureIndex(tf);
+
+   if(idx<0)
+      return false;
+
+   //--------------------------------------
+   // FVG must exist
+   //--------------------------------------
+
+   if(!FVGData[idx].valid)
+      return false;
+
+   //--------------------------------------
+   // Direction must match
+   //--------------------------------------
+
+   if(FVGData[idx].direction!=direction)
+      return false;
+
+   return true;
+}
+
+//----------------------------------------------------
+// Monitor Fair Value Gap
+//----------------------------------------------------
+
+void MonitorPatternFVG()
+{
+   for(int i=0;
+       i<ACTIVE_SCAN_TIMEFRAMES;
+       i++)
+   {
+      if(!PatternData[i].active)
+         continue;
+
+      if(PatternData[i].stage
+         !=
+         PATTERN_WAITING_FVG)
+      {
+         continue;
+      }
+
+      //--------------------------------------
+      // Confirm FVG
+      //--------------------------------------
+
+      if(!ConfirmPatternFVG(
+            PatternData[i].timeframe,
+            PatternData[i].direction))
+      {
+         continue;
+      }
+
+      //--------------------------------------
+      // Advance Pattern
+      //--------------------------------------
+
+      PatternData[i]
+         .fvgConfirmed=true;
+
+      PatternData[i]
+         .stage=
+         PATTERN_WAITING_ORDERBLOCK;
+
+      PatternData[i]
+         .lastUpdate=
+         TimeCurrent();
+   }
+}
+
+//----------------------------------------------------
+// Pattern Waiting For FVG
+//----------------------------------------------------
+
+bool PatternWaitingForFVG(
+   ENUM_TIMEFRAMES tf)
+{
+   int idx=
+      StructureIndex(tf);
+
+   if(idx<0)
+      return false;
+
+   return
+      PatternData[idx].active
+      &&
+      PatternData[idx].stage
+      ==
+      PATTERN_WAITING_FVG;
+}
+
+
+
+
+
 
 
 //====================================================
