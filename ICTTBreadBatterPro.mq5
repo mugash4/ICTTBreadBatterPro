@@ -9865,11 +9865,392 @@ void RestoreDashboard()
    SetDashboardMode(DASHBOARD_FULL);
 }
 
+//----------------------------------------------------------
+// Create Dashboard Buttons
+//----------------------------------------------------------
+void CreateDashboardButtons()
+{
+   CreateDashboardButton(
+      "BTN_MIN",
+      "-",
+      Dashboard.x+Dashboard.width-72,
+      Dashboard.y+4,
+      20,
+      20);
+
+   CreateDashboardButton(
+      "BTN_FULL",
+      "□",
+      Dashboard.x+Dashboard.width-48,
+      Dashboard.y+4,
+      20,
+      20);
+
+   CreateDashboardButton(
+      "BTN_HIDE",
+      "X",
+      Dashboard.x+Dashboard.width-24,
+      Dashboard.y+4,
+      20,
+      20);
+}
 
 
+//----------------------------------------------------------
+// Create Dashboard Button
+//----------------------------------------------------------
+void CreateDashboardButton(
+   string id,
+   string text,
+   int x,
+   int y,
+   int width,
+   int height)
+{
+   string name=DashboardObjectName(id);
+
+   ObjectCreate(0,name,OBJ_BUTTON,0,0,0);
+
+   ObjectSetInteger(0,name,OBJPROP_XDISTANCE,x);
+   ObjectSetInteger(0,name,OBJPROP_YDISTANCE,y);
+
+   ObjectSetInteger(0,name,OBJPROP_XSIZE,width);
+   ObjectSetInteger(0,name,OBJPROP_YSIZE,height);
+
+   ObjectSetString(0,name,OBJPROP_TEXT,text);
+
+   ObjectSetInteger(0,name,OBJPROP_FONTSIZE,9);
+
+   ObjectSetInteger(0,name,OBJPROP_BGCOLOR,clrDimGray);
+
+   ObjectSetInteger(0,name,OBJPROP_COLOR,clrWhite);
+
+   ObjectSetInteger(0,name,OBJPROP_BORDER_COLOR,clrSilver);
+}
 
 
+//----------------------------------------------------------
+// Create Restore Button
+//----------------------------------------------------------
+void CreateRestoreButton()
+{
+   ObjectCreate(
+      0,
+      DashboardObjectName("RESTORE"),
+      OBJ_BUTTON,
+      0,
+      0,
+      0);
 
+   ObjectSetInteger(
+      0,
+      DashboardObjectName("RESTORE"),
+      OBJPROP_XDISTANCE,
+      5);
+
+   ObjectSetInteger(
+      0,
+      DashboardObjectName("RESTORE"),
+      OBJPROP_YDISTANCE,
+      30);
+
+   ObjectSetInteger(
+      0,
+      DashboardObjectName("RESTORE"),
+      OBJPROP_XSIZE,
+      40);
+
+   ObjectSetInteger(
+      0,
+      DashboardObjectName("RESTORE"),
+      OBJPROP_YSIZE,
+      20);
+
+   ObjectSetString(
+      0,
+      DashboardObjectName("RESTORE"),
+      OBJPROP_TEXT,
+      "DH");
+}
+
+
+//----------------------------------------------------------
+// Delete Restore Button
+//----------------------------------------------------------
+void DeleteRestoreButton()
+{
+   ObjectDelete(
+      0,
+      DashboardObjectName("RESTORE"));
+}
+
+//----------------------------------------------------------
+// Dashboard Events
+//----------------------------------------------------------
+void ProcessDashboardEvent(string object)
+{
+   if(object==DashboardObjectName("BTN_MIN"))
+   {
+      SetDashboardMode(DASHBOARD_COMPACT);
+      return;
+   }
+
+   if(object==DashboardObjectName("BTN_FULL"))
+   {
+      SetDashboardMode(DASHBOARD_FULL);
+      return;
+   }
+
+   if(object==DashboardObjectName("BTN_HIDE"))
+   {
+      SetDashboardMode(DASHBOARD_HIDDEN);
+      return;
+   }
+
+   if(object==DashboardObjectName("RESTORE"))
+   {
+      RestoreDashboard();
+      return;
+   }
+}
+
+
+//----------------------------------------------------------
+// Dashboard Position
+//----------------------------------------------------------
+struct DashboardPosition
+{
+   int x;
+   int y;
+
+   bool dragging;
+
+   int mouseX;
+   int mouseY;
+};
+
+DashboardPosition DashboardPos;
+
+
+//----------------------------------------------------------
+// Save Dashboard Position
+//----------------------------------------------------------
+void SaveDashboardPosition()
+{
+   GlobalVariableSet(
+      "DHSP_Dashboard_X",
+      Dashboard.x);
+
+   GlobalVariableSet(
+      "DHSP_Dashboard_Y",
+      Dashboard.y);
+}
+
+
+//----------------------------------------------------------
+// Load Dashboard Position
+//----------------------------------------------------------
+void LoadDashboardPosition()
+{
+   if(GlobalVariableCheck("DHSP_Dashboard_X"))
+      Dashboard.x=
+      (int)GlobalVariableGet(
+      "DHSP_Dashboard_X");
+
+   if(GlobalVariableCheck("DHSP_Dashboard_Y"))
+      Dashboard.y=
+      (int)GlobalVariableGet(
+      "DHSP_Dashboard_Y");
+}
+
+//----------------------------------------------------------
+// Begin Drag
+//----------------------------------------------------------
+void BeginDashboardDrag(
+   int mouseX,
+   int mouseY)
+{
+   DashboardPos.dragging=true;
+
+   DashboardPos.mouseX=mouseX;
+
+   DashboardPos.mouseY=mouseY;
+}
+
+
+//----------------------------------------------------------
+// Drag Dashboard
+//----------------------------------------------------------
+void DragDashboard(
+   int mouseX,
+   int mouseY)
+{
+   if(!DashboardPos.dragging)
+      return;
+
+   Dashboard.x +=
+      mouseX-
+      DashboardPos.mouseX;
+
+   Dashboard.y +=
+      mouseY-
+      DashboardPos.mouseY;
+
+   DashboardPos.mouseX=mouseX;
+
+   DashboardPos.mouseY=mouseY;
+
+   BuildDashboard();
+}
+
+//----------------------------------------------------------
+// End Drag
+//----------------------------------------------------------
+void EndDashboardDrag()
+{
+   DashboardPos.dragging=false;
+
+   SaveDashboardPosition();
+}
+
+
+//----------------------------------------------------------
+// Keep Dashboard On Screen
+//----------------------------------------------------------
+void ClampDashboard()
+{
+   Dashboard.x=
+      MathMax(
+      0,
+      Dashboard.x);
+
+   Dashboard.y=
+      MathMax(
+      0,
+      Dashboard.y);
+
+   Dashboard.x=
+      MathMin(
+      Dashboard.chartWidth-
+      Dashboard.width,
+      Dashboard.x);
+
+   Dashboard.y=
+      MathMin(
+      Dashboard.chartHeight-
+      Dashboard.height,
+      Dashboard.y);
+}
+
+
+//----------------------------------------------------------
+// Detect Chart Resolution
+//----------------------------------------------------------
+void DetectDashboardResolution()
+{
+   Dashboard.chartWidth =
+      (int)ChartGetInteger(
+      0,
+      CHART_WIDTH_IN_PIXELS);
+
+   Dashboard.chartHeight =
+      (int)ChartGetInteger(
+      0,
+      CHART_HEIGHT_IN_PIXELS);
+}
+
+//----------------------------------------------------------
+// Auto Layout Dashboard
+//----------------------------------------------------------
+void UpdateDashboardLayout()
+{
+   DetectDashboardResolution();
+
+   ClampDashboard();
+
+   switch(Dashboard.mode)
+   {
+      case DASHBOARD_FULL:
+
+         Dashboard.width  = 620;
+         Dashboard.height = 420;
+
+         break;
+
+      case DASHBOARD_COMPACT:
+
+         Dashboard.width  = 280;
+         Dashboard.height = 120;
+
+         break;
+
+      case DASHBOARD_HIDDEN:
+
+         Dashboard.width  = 40;
+         Dashboard.height = 40;
+
+         break;
+   }
+}
+
+
+//----------------------------------------------------------
+// Dashboard Layout Changed
+//----------------------------------------------------------
+bool DashboardLayoutChanged()
+{
+   static int lastWidth=0;
+   static int lastHeight=0;
+
+   DetectDashboardResolution();
+
+   if(lastWidth!=Dashboard.chartWidth ||
+      lastHeight!=Dashboard.chartHeight)
+   {
+      lastWidth=Dashboard.chartWidth;
+      lastHeight=Dashboard.chartHeight;
+
+      return true;
+   }
+
+   return false;
+}
+
+
+//----------------------------------------------------------
+// Update Dashboard Automatically
+//----------------------------------------------------------
+void UpdateDashboard()
+{
+   if(DashboardLayoutChanged())
+   {
+      UpdateDashboardLayout();
+
+      BuildDashboard();
+   }
+
+   if(Dashboard.needsRefresh)
+   {
+      RefreshDashboard();
+
+      Dashboard.needsRefresh=false;
+   }
+}
+
+//----------------------------------------------------------
+// Dashboard Timer
+//----------------------------------------------------------
+void DashboardTimer()
+{
+   static datetime lastUpdate=0;
+
+   if(TimeCurrent()-lastUpdate<1)
+      return;
+
+   UpdateDashboard();
+
+   lastUpdate=TimeCurrent();
+}
 
 
 
