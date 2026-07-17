@@ -8926,5 +8926,954 @@ void CleanLearningQueue()
 
 
 
+//+------------------------------------------------------------------+
+//| SECTION 23 : SYSTEM ORCHESTRATOR & DASHBOARD ENGINE             |
+//+------------------------------------------------------------------+
+
+//----------------------------------------------------------
+// Dashboard Display Modes
+//----------------------------------------------------------
+enum ENUM_DASHBOARD_MODE
+{
+   DASHBOARD_FULL = 0,
+   DASHBOARD_COMPACT,
+   DASHBOARD_HIDDEN
+};
+
+//----------------------------------------------------------
+// Dashboard Information
+//----------------------------------------------------------
+struct DashboardInformation
+{
+   ENUM_DASHBOARD_MODE mode;
+
+   bool initialized;
+
+   bool visible;
+
+   bool minimized;
+
+   bool needsRefresh;
+
+   datetime lastRefresh;
+
+   int refreshInterval;
+
+   int chartWidth;
+
+   int chartHeight;
+
+   int x;
+
+   int y;
+
+   int width;
+
+   int height;
+};
+
+DashboardInformation Dashboard;
+
+
+//----------------------------------------------------------
+// System Controller
+//----------------------------------------------------------
+struct SystemController
+{
+   bool initialized;
+
+   bool marketReady;
+
+   bool tradingEnabled;
+
+   bool learningEnabled;
+
+   bool dashboardReady;
+
+   bool systemHealthy;
+
+   datetime startupTime;
+
+   datetime lastTick;
+};
+
+SystemController SystemState;
+
+//----------------------------------------------------------
+// Initialize System Controller
+//----------------------------------------------------------
+bool InitializeSystemController()
+{
+   ZeroMemory(SystemState);
+
+   SystemState.initialized = true;
+
+   SystemState.marketReady = false;
+
+   SystemState.tradingEnabled = true;
+
+   SystemState.learningEnabled = true;
+
+   SystemState.dashboardReady = false;
+
+   SystemState.systemHealthy = true;
+
+   SystemState.startupTime = TimeCurrent();
+
+   SystemState.lastTick = TimeCurrent();
+
+   return true;
+}
+
+//----------------------------------------------------------
+// Initialize Dashboard
+//----------------------------------------------------------
+bool InitializeDashboard()
+{
+   ZeroMemory(Dashboard);
+
+   Dashboard.mode = DASHBOARD_FULL;
+
+   Dashboard.initialized = true;
+
+   Dashboard.visible = true;
+
+   Dashboard.minimized = false;
+
+   Dashboard.needsRefresh = true;
+
+   Dashboard.refreshInterval = 1;
+
+   Dashboard.chartWidth =
+      (int)ChartGetInteger(0,CHART_WIDTH_IN_PIXELS);
+
+   Dashboard.chartHeight =
+      (int)ChartGetInteger(0,CHART_HEIGHT_IN_PIXELS);
+
+   Dashboard.x = 20;
+
+   Dashboard.y = 20;
+
+   Dashboard.width = 620;
+
+   Dashboard.height = 420;
+
+   SystemState.dashboardReady = true;
+
+   return true;
+}
+
+//----------------------------------------------------------
+// Main System Orchestrator
+//----------------------------------------------------------
+void ProcessSystemController()
+{
+   //--------------------------------------------------
+   // Update Tick
+   //--------------------------------------------------
+   SystemState.lastTick = TimeCurrent();
+
+   //--------------------------------------------------
+   // Market Ready
+   //--------------------------------------------------
+   SystemState.marketReady = IsMarketAvailable();
+
+   if(!SystemState.marketReady)
+      return;
+
+   //--------------------------------------------------
+   // SECTION 19
+   // Liquidity Engine
+   //--------------------------------------------------
+   ProcessLiquidityEngine();
+
+   //--------------------------------------------------
+   // SECTION 20
+   // Decision Engine
+   //--------------------------------------------------
+   ProcessDecisionEngine();
+
+   //--------------------------------------------------
+   // SECTION 21
+   // Execution Engine
+   //--------------------------------------------------
+   ProcessExecutionEngine();
+
+   //--------------------------------------------------
+   // SECTION 22
+   // Learning Engine
+   //--------------------------------------------------
+   ProcessLearningEngine();
+
+   //--------------------------------------------------
+   // Dashboard
+   //--------------------------------------------------
+   ProcessDashboard();
+
+   //--------------------------------------------------
+   // Notifications
+   //--------------------------------------------------
+   ProcessNotifications();
+
+   //--------------------------------------------------
+   // Health Monitor
+   //--------------------------------------------------
+   ProcessHealthMonitor();
+
+   //--------------------------------------------------
+   // Logger
+   //--------------------------------------------------
+   ProcessLogger();
+}
+
+//----------------------------------------------------------
+// System Ready
+//----------------------------------------------------------
+bool IsSystemReady()
+{
+   if(!SystemState.initialized)
+      return false;
+
+   if(!SystemState.dashboardReady)
+      return false;
+
+   if(!SystemState.systemHealthy)
+      return false;
+
+   return true;
+}
+
+
+//----------------------------------------------------------
+// Market Available
+//----------------------------------------------------------
+bool IsMarketAvailable()
+{
+   if(!TerminalInfoInteger(TERMINAL_CONNECTED))
+      return false;
+
+   if(!MQLInfoInteger(MQL_TRADE_ALLOWED))
+      return false;
+
+   if(!AccountInfoInteger(ACCOUNT_TRADE_ALLOWED))
+      return false;
+
+   return true;
+}
+
+//----------------------------------------------------------
+// Startup Routine
+//----------------------------------------------------------
+bool InitializeSystem()
+{
+   if(!InitializeSystemController())
+      return false;
+
+   if(!LoadLearningDatabase())
+      return false;
+
+   if(!InitializeDashboard())
+      return false;
+
+   return true;
+}
+
+
+//----------------------------------------------------------
+// Dashboard Prefix
+//----------------------------------------------------------
+string DashboardPrefix = "DHSP_";
+
+//----------------------------------------------------------
+// Dashboard Object Name
+//----------------------------------------------------------
+string DashboardObjectName(const string name)
+{
+   return DashboardPrefix + name;
+}
+
+//----------------------------------------------------------
+// Delete Dashboard Objects
+//----------------------------------------------------------
+void DeleteDashboard()
+{
+   ObjectsDeleteAll(0,DashboardPrefix);
+}
+
+//----------------------------------------------------------
+// Dashboard Exists
+//----------------------------------------------------------
+bool DashboardExists()
+{
+   return(ObjectFind(0,DashboardObjectName("BACKGROUND"))>=0);
+}
+
+//----------------------------------------------------------
+// Dashboard Layout
+//----------------------------------------------------------
+struct DashboardLayout
+{
+   int margin;
+
+   int panelWidth;
+
+   int panelHeight;
+
+   int headerHeight;
+
+   int rowGap;
+
+   int columnGap;
+
+   int fontSize;
+
+   color background;
+
+   color border;
+
+   color header;
+
+   color text;
+
+   color title;
+
+   color positive;
+
+   color warning;
+
+   color negative;
+};
+
+DashboardLayout DashboardStyle;
+
+
+//----------------------------------------------------------
+// Dashboard Theme
+//----------------------------------------------------------
+void InitializeDashboardTheme()
+{
+   DashboardStyle.margin = 10;
+
+   DashboardStyle.panelWidth = 290;
+
+   DashboardStyle.panelHeight = 115;
+
+   DashboardStyle.headerHeight = 28;
+
+   DashboardStyle.rowGap = 8;
+
+   DashboardStyle.columnGap = 8;
+
+   DashboardStyle.fontSize = 9;
+
+   DashboardStyle.background = clrBlack;
+
+   DashboardStyle.border = clrDimGray;
+
+   DashboardStyle.header = clrDarkSlateGray;
+
+   DashboardStyle.text = clrWhite;
+
+   DashboardStyle.title = clrGold;
+
+   DashboardStyle.positive = clrLime;
+
+   DashboardStyle.warning = clrOrange;
+
+   DashboardStyle.negative = clrRed;
+}
+
+
+//----------------------------------------------------------
+// Calculate Dashboard Layout
+//----------------------------------------------------------
+void CalculateDashboardLayout()
+{
+   Dashboard.chartWidth =
+      (int)ChartGetInteger(0,
+      CHART_WIDTH_IN_PIXELS);
+
+   Dashboard.chartHeight =
+      (int)ChartGetInteger(0,
+      CHART_HEIGHT_IN_PIXELS);
+
+   Dashboard.width =
+      DashboardStyle.panelWidth*2+
+      DashboardStyle.columnGap+
+      DashboardStyle.margin*2;
+
+   Dashboard.height =
+      DashboardStyle.panelHeight*3+
+      DashboardStyle.rowGap*2+
+      DashboardStyle.margin*2+
+      DashboardStyle.headerHeight;
+
+   Dashboard.x = 20;
+
+   Dashboard.y = 20;
+}
+
+//----------------------------------------------------------
+// Build Dashboard
+//----------------------------------------------------------
+void BuildDashboard()
+{
+   DeleteDashboard();
+
+   CalculateDashboardLayout();
+
+   CreateDashboardBackground();
+
+   CreateDashboardPanels();
+
+   CreateDashboardTitles();
+
+   Dashboard.visible = true;
+
+   Dashboard.needsRefresh = true;
+}
+
+//----------------------------------------------------------
+// Create Dashboard Background
+//----------------------------------------------------------
+void CreateDashboardBackground()
+{
+   string name = DashboardObjectName("BACKGROUND");
+
+   ObjectCreate(0,name,OBJ_RECTANGLE_LABEL,0,0,0);
+
+   ObjectSetInteger(0,name,OBJPROP_XDISTANCE,Dashboard.x);
+   ObjectSetInteger(0,name,OBJPROP_YDISTANCE,Dashboard.y);
+
+   ObjectSetInteger(0,name,OBJPROP_XSIZE,Dashboard.width);
+   ObjectSetInteger(0,name,OBJPROP_YSIZE,Dashboard.height);
+
+   ObjectSetInteger(0,name,OBJPROP_BGCOLOR,DashboardStyle.background);
+   ObjectSetInteger(0,name,OBJPROP_COLOR,DashboardStyle.border);
+
+   ObjectSetInteger(0,name,OBJPROP_BACK,false);
+   ObjectSetInteger(0,name,OBJPROP_HIDDEN,true);
+   ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);
+}
+
+
+//----------------------------------------------------------
+// Create Dashboard Panel
+//----------------------------------------------------------
+void CreatePanel(string id,
+                 int x,
+                 int y,
+                 int width,
+                 int height)
+{
+   string name = DashboardObjectName(id);
+
+   ObjectCreate(0,name,OBJ_RECTANGLE_LABEL,0,0,0);
+
+   ObjectSetInteger(0,name,OBJPROP_XDISTANCE,x);
+
+   ObjectSetInteger(0,name,OBJPROP_YDISTANCE,y);
+
+   ObjectSetInteger(0,name,OBJPROP_XSIZE,width);
+
+   ObjectSetInteger(0,name,OBJPROP_YSIZE,height);
+
+   ObjectSetInteger(0,name,OBJPROP_BGCOLOR,DashboardStyle.background);
+
+   ObjectSetInteger(0,name,OBJPROP_COLOR,DashboardStyle.border);
+
+   ObjectSetInteger(0,name,OBJPROP_BACK,false);
+
+   ObjectSetInteger(0,name,OBJPROP_HIDDEN,true);
+
+   ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);
+}
+
+
+//----------------------------------------------------------
+// Create Dashboard Panels
+//----------------------------------------------------------
+void CreateDashboardPanels()
+{
+   int left =
+      Dashboard.x +
+      DashboardStyle.margin;
+
+   int right =
+      left +
+      DashboardStyle.panelWidth +
+      DashboardStyle.columnGap;
+
+   int top =
+      Dashboard.y +
+      DashboardStyle.margin +
+      DashboardStyle.headerHeight;
+
+   //--------------------------------------------------
+   // Row 1
+   //--------------------------------------------------
+
+   CreatePanel("EA_STATUS",
+               left,
+               top,
+               DashboardStyle.panelWidth,
+               DashboardStyle.panelHeight);
+
+   CreatePanel("MARKET_STATUS",
+               right,
+               top,
+               DashboardStyle.panelWidth,
+               DashboardStyle.panelHeight);
+
+   //--------------------------------------------------
+   // Row 2
+   //--------------------------------------------------
+
+   top += DashboardStyle.panelHeight +
+          DashboardStyle.rowGap;
+
+   CreatePanel("ICT_ENGINE",
+               left,
+               top,
+               DashboardStyle.panelWidth,
+               DashboardStyle.panelHeight);
+
+   CreatePanel("TRADE_ENGINE",
+               right,
+               top,
+               DashboardStyle.panelWidth,
+               DashboardStyle.panelHeight);
+
+   //--------------------------------------------------
+   // Row 3
+   //--------------------------------------------------
+
+   top += DashboardStyle.panelHeight +
+          DashboardStyle.rowGap;
+
+   CreatePanel("LEARNING",
+               left,
+               top,
+               DashboardStyle.panelWidth,
+               DashboardStyle.panelHeight);
+
+   CreatePanel("ACCOUNT",
+               right,
+               top,
+               DashboardStyle.panelWidth,
+               DashboardStyle.panelHeight);
+}
+
+
+
+//----------------------------------------------------------
+// Create Dashboard Titles
+//----------------------------------------------------------
+void CreateDashboardTitles()
+{
+   CreatePanelTitle("EA_STATUS_TITLE",
+                    "EA STATUS");
+
+   CreatePanelTitle("MARKET_STATUS_TITLE",
+                    "MARKET STATUS");
+
+   CreatePanelTitle("ICT_ENGINE_TITLE",
+                    "ICT ENGINE");
+
+   CreatePanelTitle("TRADE_ENGINE_TITLE",
+                    "TRADE ENGINE");
+
+   CreatePanelTitle("LEARNING_TITLE",
+                    "LEARNING ENGINE");
+
+   CreatePanelTitle("ACCOUNT_TITLE",
+                    "ACCOUNT & EVENTS");
+}
+
+
+
+//----------------------------------------------------------
+// Process Dashboard
+//----------------------------------------------------------
+void ProcessDashboard()
+{
+   if(!Dashboard.initialized)
+      return;
+
+   if(Dashboard.mode == DASHBOARD_HIDDEN)
+      return;
+
+   RefreshDashboard();
+}
+
+
+//----------------------------------------------------------
+// Refresh Dashboard
+//----------------------------------------------------------
+void RefreshDashboard()
+{
+   static datetime lastRefresh=0;
+
+   if(TimeCurrent()-lastRefresh <
+      Dashboard.refreshInterval)
+      return;
+
+   UpdateEAStatusPanel();
+
+   UpdateMarketStatusPanel();
+
+   UpdateICTPanel();
+
+   UpdateTradePanel();
+
+   UpdateLearningPanel();
+
+   UpdateAccountPanel();
+
+   lastRefresh=TimeCurrent();
+}
+
+
+//----------------------------------------------------------
+// Update EA Status
+//----------------------------------------------------------
+void UpdateEAStatusPanel()
+{
+   SetDashboardValue("EA_STATUS_1",
+      "EA",
+      SystemState.initialized ? "RUNNING" : "STOPPED");
+
+   SetDashboardValue("EA_STATUS_2",
+      "Trading",
+      SystemState.tradingEnabled ? "ENABLED" : "DISABLED");
+
+   SetDashboardValue("EA_STATUS_3",
+      "Learning",
+      SystemState.learningEnabled ? "ACTIVE" : "OFF");
+
+   SetDashboardValue("EA_STATUS_4",
+      "Health",
+      SystemState.systemHealthy ? "GOOD" : "ERROR");
+
+   SetDashboardValue("EA_STATUS_5",
+      "Version",
+      EA_VERSION);
+}
+
+//----------------------------------------------------------
+// Update Market Status
+//----------------------------------------------------------
+void UpdateMarketStatusPanel()
+{
+   SetDashboardValue("MARKET_1",
+      "Symbol",
+      _Symbol);
+
+   SetDashboardValue("MARKET_2",
+      "Session",
+      CurrentSessionName);
+
+   SetDashboardValue("MARKET_3",
+      "Trend",
+      EnumToString(CurrentTrend));
+
+   SetDashboardValue("MARKET_4",
+      "Bias",
+      EnumToString(CurrentBias));
+
+   SetDashboardValue("MARKET_5",
+      "Spread",
+      DoubleToString(CurrentSpread,1));
+
+   SetDashboardValue("MARKET_6",
+      "Volatility",
+      EnumToString(CurrentVolatility));
+}
+
+//----------------------------------------------------------
+// Update ICT Engine
+//----------------------------------------------------------
+void UpdateICTPanel()
+{
+   SetDashboardValue("ICT_1",
+      "Liquidity",
+      LiquidityStatus);
+
+   SetDashboardValue("ICT_2",
+      "Sweep",
+      SweepStatus);
+
+   SetDashboardValue("ICT_3",
+      "MSS",
+      MSSStatus);
+
+   SetDashboardValue("ICT_4",
+      "Displacement",
+      DisplacementStatus);
+
+   SetDashboardValue("ICT_5",
+      "FVG",
+      FVGStatus);
+
+   SetDashboardValue("ICT_6",
+      "Order Block",
+      OBStatus);
+
+   SetDashboardValue("ICT_7",
+      "Retracement",
+      RetracementStatus);
+}
+
+//----------------------------------------------------------
+// Update Trade Panel
+//----------------------------------------------------------
+void UpdateTradePanel()
+{
+   SetDashboardValue("TRADE_1",
+      "Direction",
+      CurrentTrade.direction);
+
+   SetDashboardValue("TRADE_2",
+      "Risk",
+      DoubleToString(CurrentRiskPercent,2)+"%");
+
+   SetDashboardValue("TRADE_3",
+      "Lot",
+      DoubleToString(CurrentTrade.volume,2));
+
+   SetDashboardValue("TRADE_4",
+      "RR",
+      DoubleToString(CurrentTrade.targetRR,2));
+
+   SetDashboardValue("TRADE_5",
+      "Status",
+      ExecutionStatusName);
+}
+
+//----------------------------------------------------------
+// Update Learning Panel
+//----------------------------------------------------------
+void UpdateLearningPanel()
+{
+   SetDashboardValue("LEARN_1",
+      "Trades Learned",
+      IntegerToString(Stats.totalTrades));
+
+   SetDashboardValue("LEARN_2",
+      "Win Rate",
+      DoubleToString(Stats.winRate,1)+"%");
+
+   SetDashboardValue("LEARN_3",
+      "Confidence",
+      ConfidenceLevelName);
+
+   SetDashboardValue("LEARN_4",
+      "Best Pattern",
+      BestPatternName);
+
+   SetDashboardValue("LEARN_5",
+      "Best Session",
+      BestSessionName);
+
+   SetDashboardValue("LEARN_6",
+      "Learning",
+      SystemState.learningEnabled ? "ACTIVE" : "OFF");
+}
+
+
+//----------------------------------------------------------
+// Update Account Panel
+//----------------------------------------------------------
+void UpdateAccountPanel()
+{
+   SetDashboardValue("ACCOUNT_1",
+      "Balance",
+      DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE),2));
+
+   SetDashboardValue("ACCOUNT_2",
+      "Equity",
+      DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY),2));
+
+   SetDashboardValue("ACCOUNT_3",
+      "Floating P/L",
+      DoubleToString(CurrentFloatingProfit,2));
+
+   SetDashboardValue("ACCOUNT_4",
+      "Today's P/L",
+      DoubleToString(TodayProfit,2));
+
+   SetDashboardValue("ACCOUNT_5",
+      "Daily Max Loss",
+      DoubleToString(DailyMaxLossPercent,1)+"%");
+
+   SetDashboardValue("ACCOUNT_6",
+      "Remaining Loss",
+      DoubleToString(RemainingDailyLoss,2));
+
+   SetDashboardValue("ACCOUNT_7",
+      "Trading Status",
+      TradingEnabled ? "ENABLED" : "DISABLED");
+}
+
+
+//----------------------------------------------------------
+// Update News Information
+//----------------------------------------------------------
+void UpdateNewsPanel()
+{
+   SetDashboardValue("NEWS_1",
+      "News Filter",
+      EnableNewsFilter ? "ON" : "OFF");
+
+   SetDashboardValue("NEWS_2",
+      "Next News",
+      NextNewsName);
+
+   SetDashboardValue("NEWS_3",
+      "Impact",
+      NextNewsImpact);
+
+   SetDashboardValue("NEWS_4",
+      "Countdown",
+      NewsCountdownText);
+
+   SetDashboardValue("NEWS_5",
+      "Trading Block",
+      NewsTradingBlocked ? "ACTIVE" : "OFF");
+}
+
+
+//----------------------------------------------------------
+// Update Daily Protection
+//----------------------------------------------------------
+void UpdateRiskStatus()
+{
+   SetDashboardValue("RISK_1",
+      "Risk %",
+      DoubleToString(CurrentRiskPercent,2)+"%");
+
+   SetDashboardValue("RISK_2",
+      "Drawdown",
+      DoubleToString(CurrentDrawdownPercent,2)+"%");
+
+   SetDashboardValue("RISK_3",
+      "Reset",
+      DailyResetCountdown);
+
+   SetDashboardValue("RISK_4",
+      "Health",
+      SystemState.systemHealthy ? "GOOD" : "ERROR");
+}
+
+
+//----------------------------------------------------------
+// Set Dashboard Mode
+//----------------------------------------------------------
+void SetDashboardMode(ENUM_DASHBOARD_MODE mode)
+{
+   if(Dashboard.mode==mode)
+      return;
+
+   Dashboard.mode=mode;
+
+   Dashboard.needsRefresh=true;
+
+   UpdateDashboardMode();
+}
+
+
+//----------------------------------------------------------
+// Update Dashboard Mode
+//----------------------------------------------------------
+void UpdateDashboardMode()
+{
+   switch(Dashboard.mode)
+   {
+      case DASHBOARD_FULL:
+
+         ShowFullDashboard();
+
+         break;
+
+      case DASHBOARD_COMPACT:
+
+         ShowCompactDashboard();
+
+         break;
+
+      case DASHBOARD_HIDDEN:
+
+         HideDashboard();
+
+         break;
+   }
+}
+
+//----------------------------------------------------------
+// Full Dashboard
+//----------------------------------------------------------
+void ShowFullDashboard()
+{
+   Dashboard.visible=true;
+
+   Dashboard.minimized=false;
+
+   Dashboard.width=620;
+
+   Dashboard.height=420;
+
+   BuildDashboard();
+}
+
+
+//----------------------------------------------------------
+// Compact Dashboard
+//----------------------------------------------------------
+void ShowCompactDashboard()
+{
+   Dashboard.visible=true;
+
+   Dashboard.minimized=true;
+
+   Dashboard.width=280;
+
+   Dashboard.height=120;
+
+   BuildCompactDashboard();
+}
+
+
+//----------------------------------------------------------
+// Hide Dashboard
+//----------------------------------------------------------
+void HideDashboard()
+{
+   Dashboard.visible=false;
+
+   DeleteDashboard();
+
+   CreateRestoreButton();
+}
+
+//----------------------------------------------------------
+// Restore Dashboard
+//----------------------------------------------------------
+void RestoreDashboard()
+{
+   DeleteRestoreButton();
+
+   SetDashboardMode(DASHBOARD_FULL);
+}
+
+
+
+
+
+
+
+
+
+
+
 
 
