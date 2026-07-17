@@ -7977,10 +7977,951 @@ void ProcessTradeEngine()
 }
 
 
+//+------------------------------------------------------------------+
+//| SECTION 22 : MARKET INTELLIGENCE & ADAPTIVE LEARNING ENGINE      |
+//+------------------------------------------------------------------+
+
+//----------------------------------------------------------
+// Learning Confidence
+//----------------------------------------------------------
+enum ENUM_CONFIDENCE_LEVEL
+{
+   CONFIDENCE_UNKNOWN = 0,
+   CONFIDENCE_LOW,
+   CONFIDENCE_MEDIUM,
+   CONFIDENCE_HIGH,
+   CONFIDENCE_VERY_HIGH
+};
+
+//----------------------------------------------------------
+// Pattern Statistics
+//----------------------------------------------------------
+struct PatternStatistics
+{
+   ulong                patternID;
+
+   ulong                liquidityID;
+
+   ENUM_TIMEFRAMES      timeframe;
+
+   string               symbol;
+
+   int                  totalTrades;
+
+   int                  wins;
+
+   int                  losses;
+
+   double               totalProfit;
+
+   double               totalLoss;
+
+   double               winRate;
+
+   double               averageRR;
+
+   double               confidence;
+
+   ENUM_CONFIDENCE_LEVEL confidenceLevel;
+
+   datetime             firstTrade;
+
+   datetime             lastTrade;
+};
+
+//----------------------------------------------------------
+// Session Statistics
+//----------------------------------------------------------
+struct SessionStatistics
+{
+   string               sessionName;
+
+   int                  trades;
+
+   int                  wins;
+
+   int                  losses;
+
+   double               winRate;
+
+   double               averageRR;
+
+   double               netProfit;
+};
+
+//----------------------------------------------------------
+// Symbol Statistics
+//----------------------------------------------------------
+struct SymbolStatistics
+{
+   string               symbol;
+
+   int                  trades;
+
+   int                  wins;
+
+   int                  losses;
+
+   double               winRate;
+
+   double               averageRR;
+
+   double               profitFactor;
+
+   double               netProfit;
+};
+
+//----------------------------------------------------------
+// Global Learning Database
+//----------------------------------------------------------
+PatternStatistics PatternDB[];
+
+SessionStatistics SessionDB[];
+
+SymbolStatistics SymbolDB[];
 
 
+//----------------------------------------------------------
+// Record Completed Trade
+//----------------------------------------------------------
+void RecordCompletedTrade()
+{
+   if(CurrentTrade.active)
+      return;
+
+   if(CurrentTrade.patternID == 0)
+      return;
+
+   int index = FindPatternStatistics(CurrentTrade.patternID);
+
+   if(index < 0)
+   {
+      index = CreatePatternStatistics(CurrentTrade.patternID);
+   }
+
+   PatternDB[index].totalTrades++;
+
+   double profit = CurrentTrade.realizedProfit;
+
+   if(profit >= 0.0)
+   {
+      PatternDB[index].wins++;
+      PatternDB[index].totalProfit += profit;
+   }
+   else
+   {
+      PatternDB[index].losses++;
+      PatternDB[index].totalLoss += MathAbs(profit);
+   }
+
+   PatternDB[index].lastTrade = TimeCurrent();
+
+   UpdatePatternStatistics(index);
+
+   UpdateSessionStatistics(index);
+
+   UpdateSymbolStatistics(index);
+}
 
 
+//----------------------------------------------------------
+// Find Pattern Statistics
+//----------------------------------------------------------
+int FindPatternStatistics(const ulong patternID)
+{
+   for(int i=0;i<ArraySize(PatternDB);i++)
+   {
+      if(PatternDB[i].patternID == patternID)
+         return i;
+   }
+
+   return -1;
+}
+
+
+//----------------------------------------------------------
+// Create Pattern Statistics
+//----------------------------------------------------------
+int CreatePatternStatistics(const ulong patternID)
+{
+   int index = ArraySize(PatternDB);
+
+   ArrayResize(PatternDB,index+1);
+
+   ZeroMemory(PatternDB[index]);
+
+   PatternDB[index].patternID      = patternID;
+   PatternDB[index].liquidityID    = CurrentTrade.liquidityID;
+   PatternDB[index].symbol         = _Symbol;
+   PatternDB[index].timeframe      = PERIOD_CURRENT;
+
+   PatternDB[index].firstTrade     = TimeCurrent();
+   PatternDB[index].lastTrade      = TimeCurrent();
+
+   PatternDB[index].confidenceLevel = CONFIDENCE_UNKNOWN;
+
+   return index;
+}
+
+//----------------------------------------------------------
+// Update Pattern Statistics
+//----------------------------------------------------------
+void UpdatePatternStatistics(const int index)
+{
+   if(index < 0)
+      return;
+
+   if(index >= ArraySize(PatternDB))
+      return;
+
+   PatternStatistics &stats = PatternDB[index];
+
+   //--------------------------------------------------
+   // Win Rate
+   //--------------------------------------------------
+   if(stats.totalTrades > 0)
+   {
+      stats.winRate =
+         (double)stats.wins /
+         (double)stats.totalTrades * 100.0;
+   }
+   else
+   {
+      stats.winRate = 0.0;
+   }
+
+   //--------------------------------------------------
+   // Net Profit
+   //--------------------------------------------------
+   double netProfit =
+      stats.totalProfit -
+      stats.totalLoss;
+
+   //--------------------------------------------------
+   // Profit Factor
+   //--------------------------------------------------
+   double profitFactor = 0.0;
+
+   if(stats.totalLoss > 0.0)
+      profitFactor =
+         stats.totalProfit /
+         stats.totalLoss;
+
+   //--------------------------------------------------
+   // Average Profit Per Trade
+   //--------------------------------------------------
+   double averageTrade = 0.0;
+
+   if(stats.totalTrades > 0)
+      averageTrade =
+         netProfit /
+         stats.totalTrades;
+
+   //--------------------------------------------------
+   // Store
+   //--------------------------------------------------
+   stats.averageProfit = averageTrade;
+
+   stats.profitFactor = profitFactor;
+}
+
+//----------------------------------------------------------
+// Update Session Statistics
+//----------------------------------------------------------
+void UpdateSessionStatistics(const int patternIndex)
+{
+   string session = GetCurrentTradingSession();
+
+   int index = FindSessionStatistics(session);
+
+   if(index < 0)
+      index = CreateSessionStatistics(session);
+
+   SessionStatistics &s = SessionDB[index];
+
+   s.trades++;
+
+   if(CurrentTrade.realizedProfit >= 0.0)
+      s.wins++;
+   else
+      s.losses++;
+
+   s.netProfit += CurrentTrade.realizedProfit;
+
+   if(s.trades > 0)
+      s.winRate =
+         (double)s.wins /
+         s.trades * 100.0;
+}
+
+//----------------------------------------------------------
+// Update Symbol Statistics
+//----------------------------------------------------------
+void UpdateSymbolStatistics(const int patternIndex)
+{
+   int index = FindSymbolStatistics(_Symbol);
+
+   if(index < 0)
+      index = CreateSymbolStatistics(_Symbol);
+
+   SymbolStatistics &s = SymbolDB[index];
+
+   s.trades++;
+
+   if(CurrentTrade.realizedProfit >= 0.0)
+      s.wins++;
+   else
+      s.losses++;
+
+   s.netProfit += CurrentTrade.realizedProfit;
+
+   if(s.trades > 0)
+      s.winRate =
+         (double)s.wins /
+         s.trades * 100.0;
+}
+
+//----------------------------------------------------------
+// Calculate Pattern Confidence
+//----------------------------------------------------------
+void CalculatePatternConfidence(const int index)
+{
+   if(index < 0)
+      return;
+
+   if(index >= ArraySize(PatternDB))
+      return;
+
+   PatternStatistics &stats = PatternDB[index];
+
+   double score = 0.0;
+
+   //--------------------------------------------------
+   // 1. Sample Size (30%)
+   //--------------------------------------------------
+   double sampleScore = MathMin((double)stats.totalTrades / 100.0,1.0);
+
+   score += sampleScore * 30.0;
+
+   //--------------------------------------------------
+   // 2. Win Rate (30%)
+   //--------------------------------------------------
+   double winScore = stats.winRate / 100.0;
+
+   score += winScore * 30.0;
+
+   //--------------------------------------------------
+   // 3. Profit Factor (25%)
+   //--------------------------------------------------
+   double pfScore = MathMin(stats.profitFactor / 3.0,1.0);
+
+   score += pfScore * 25.0;
+
+   //--------------------------------------------------
+   // 4. Average Profit (15%)
+   //--------------------------------------------------
+   double avgScore = 0.0;
+
+   if(stats.averageProfit > 0.0)
+      avgScore = 1.0;
+
+   score += avgScore * 15.0;
+
+   stats.confidence = score;
+
+   //--------------------------------------------------
+   // Confidence Level
+   //--------------------------------------------------
+   if(score >= 90.0)
+      stats.confidenceLevel = CONFIDENCE_VERY_HIGH;
+
+   else if(score >= 75.0)
+      stats.confidenceLevel = CONFIDENCE_HIGH;
+
+   else if(score >= 55.0)
+      stats.confidenceLevel = CONFIDENCE_MEDIUM;
+
+   else
+      stats.confidenceLevel = CONFIDENCE_LOW;
+}
+
+//----------------------------------------------------------
+// Update Learning Database
+//----------------------------------------------------------
+void UpdateLearningDatabase()
+{
+   for(int i=0;i<ArraySize(PatternDB);i++)
+   {
+      UpdatePatternStatistics(i);
+
+      CalculatePatternConfidence(i);
+   }
+}
+
+//----------------------------------------------------------
+// Adaptive Learning Engine
+//----------------------------------------------------------
+void UpdateAdaptiveLearning()
+{
+   for(int i=0; i<ArraySize(PatternDB); i++)
+   {
+      PatternStatistics &stats = PatternDB[i];
+
+      //--------------------------------------------------
+      // Ignore patterns with insufficient history
+      //--------------------------------------------------
+      if(stats.totalTrades < MinimumLearningTrades)
+         continue;
+
+      //--------------------------------------------------
+      // High Confidence
+      //--------------------------------------------------
+      if(stats.confidenceLevel == CONFIDENCE_VERY_HIGH)
+      {
+         stats.recommendedRiskMultiplier = 1.20;
+         stats.tradeRecommendation = true;
+      }
+
+      //--------------------------------------------------
+      // Good Confidence
+      //--------------------------------------------------
+      else if(stats.confidenceLevel == CONFIDENCE_HIGH)
+      {
+         stats.recommendedRiskMultiplier = 1.00;
+         stats.tradeRecommendation = true;
+      }
+
+      //--------------------------------------------------
+      // Medium Confidence
+      //--------------------------------------------------
+      else if(stats.confidenceLevel == CONFIDENCE_MEDIUM)
+      {
+         stats.recommendedRiskMultiplier = 0.75;
+         stats.tradeRecommendation = true;
+      }
+
+      //--------------------------------------------------
+      // Low Confidence
+      //--------------------------------------------------
+      else
+      {
+         stats.recommendedRiskMultiplier = 0.50;
+         stats.tradeRecommendation = false;
+      }
+   }
+}
+
+//----------------------------------------------------------
+// Get Pattern Recommendation
+//----------------------------------------------------------
+bool IsPatternRecommended(const ulong patternID)
+{
+   int index = FindPatternStatistics(patternID);
+
+   if(index < 0)
+      return true;
+
+   return PatternDB[index].tradeRecommendation;
+}
+
+//----------------------------------------------------------
+// Get Recommended Risk Multiplier
+//----------------------------------------------------------
+double GetRecommendedRiskMultiplier(const ulong patternID)
+{
+   int index = FindPatternStatistics(patternID);
+
+   if(index < 0)
+      return 1.0;
+
+   return PatternDB[index].recommendedRiskMultiplier;
+}
+
+//----------------------------------------------------------
+// Publish Learning Intelligence
+//----------------------------------------------------------
+void PublishLearningIntelligence()
+{
+   LearningData.ready = true;
+
+   LearningData.totalPatterns = ArraySize(PatternDB);
+
+   LearningData.lastUpdate = TimeCurrent();
+
+   LearningData.bestPattern = FindBestPattern();
+
+   LearningData.bestSession = FindBestSession();
+
+   LearningData.bestSymbol = FindBestSymbol();
+}
+
+
+//----------------------------------------------------------
+// Main Learning Engine
+//----------------------------------------------------------
+void ProcessLearningEngine()
+{
+   //--------------------------------------------------
+   // Record completed trades
+   //--------------------------------------------------
+   RecordCompletedTrade();
+
+   //--------------------------------------------------
+   // Update all statistics
+   //--------------------------------------------------
+   UpdateLearningDatabase();
+
+   //--------------------------------------------------
+   // Build adaptive intelligence
+   //--------------------------------------------------
+   UpdateAdaptiveLearning();
+
+   //--------------------------------------------------
+   // Publish intelligence
+   //--------------------------------------------------
+   PublishLearningIntelligence();
+}
+
+
+//----------------------------------------------------------
+// Is Learning Database Ready
+//----------------------------------------------------------
+bool LearningDatabaseReady()
+{
+   if(ArraySize(PatternDB) < 1)
+      return false;
+
+   return true;
+}
+
+//----------------------------------------------------------
+// Learning Progress
+//----------------------------------------------------------
+double LearningProgress()
+{
+   int trades = 0;
+
+   for(int i=0;i<ArraySize(PatternDB);i++)
+      trades += PatternDB[i].totalTrades;
+
+   return (double)trades;
+}
+
+//----------------------------------------------------------
+// Clean Learning Database
+//----------------------------------------------------------
+void MaintainLearningDatabase()
+{
+   for(int i=ArraySize(PatternDB)-1;i>=0;i--)
+   {
+      if(PatternDB[i].totalTrades==0)
+      {
+         ArrayRemove(PatternDB,i);
+      }
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Learning Database Information                                   |
+//+------------------------------------------------------------------+
+#define LEARNING_DATABASE_VERSION   1
+
+string LearningDatabaseFile = "DowHommaScalperPro_Learning.bin";
+string LearningBackupFile   = "DowHommaScalperPro_Learning_Backup.bin";
+
+//----------------------------------------------------------
+// Learning Database Header
+//----------------------------------------------------------
+struct LearningDatabaseHeader
+{
+   uint       version;
+
+   datetime   created;
+
+   datetime   lastUpdate;
+
+   uint       patternCount;
+
+   uint       sessionCount;
+
+   uint       symbolCount;
+};
+
+LearningDatabaseHeader LearningHeader;
+
+//----------------------------------------------------------
+// Initialize Learning Database
+//----------------------------------------------------------
+bool InitializeLearningDatabase()
+{
+   LearningHeader.version      = LEARNING_DATABASE_VERSION;
+   LearningHeader.created      = TimeCurrent();
+   LearningHeader.lastUpdate   = TimeCurrent();
+   LearningHeader.patternCount = 0;
+   LearningHeader.sessionCount = 0;
+   LearningHeader.symbolCount  = 0;
+
+   return true;
+}
+
+//----------------------------------------------------------
+// Save Learning Database
+//----------------------------------------------------------
+bool SaveLearningDatabase()
+{
+   int handle =
+      FileOpen(LearningDatabaseFile,
+               FILE_BIN|FILE_WRITE);
+
+   if(handle == INVALID_HANDLE)
+      return false;
+
+   LearningHeader.lastUpdate = TimeCurrent();
+
+   LearningHeader.patternCount = ArraySize(PatternDB);
+   LearningHeader.sessionCount = ArraySize(SessionDB);
+   LearningHeader.symbolCount  = ArraySize(SymbolDB);
+
+   FileWriteStruct(handle,LearningHeader);
+
+   //--------------------------------------------------
+   // Pattern Database
+   //--------------------------------------------------
+
+   for(int i=0;i<ArraySize(PatternDB);i++)
+      FileWriteStruct(handle,PatternDB[i]);
+
+   //--------------------------------------------------
+   // Session Database
+   //--------------------------------------------------
+
+   for(int i=0;i<ArraySize(SessionDB);i++)
+      FileWriteStruct(handle,SessionDB[i]);
+
+   //--------------------------------------------------
+   // Symbol Database
+   //--------------------------------------------------
+
+   for(int i=0;i<ArraySize(SymbolDB);i++)
+      FileWriteStruct(handle,SymbolDB[i]);
+
+   FileClose(handle);
+
+   return true;
+}
+
+//----------------------------------------------------------
+// Load Learning Database
+//----------------------------------------------------------
+bool LoadLearningDatabase()
+{
+   if(!FileIsExist(LearningDatabaseFile))
+      return InitializeLearningDatabase();
+
+   int handle =
+      FileOpen(LearningDatabaseFile,
+               FILE_BIN|FILE_READ);
+
+   if(handle==INVALID_HANDLE)
+      return false;
+
+   FileReadStruct(handle,LearningHeader);
+
+   ArrayResize(PatternDB,
+               LearningHeader.patternCount);
+
+   ArrayResize(SessionDB,
+               LearningHeader.sessionCount);
+
+   ArrayResize(SymbolDB,
+               LearningHeader.symbolCount);
+
+   //--------------------------------------------------
+   // Pattern Database
+   //--------------------------------------------------
+
+   for(int i=0;i<ArraySize(PatternDB);i++)
+      FileReadStruct(handle,PatternDB[i]);
+
+   //--------------------------------------------------
+   // Session Database
+   //--------------------------------------------------
+
+   for(int i=0;i<ArraySize(SessionDB);i++)
+      FileReadStruct(handle,SessionDB[i]);
+
+   //--------------------------------------------------
+   // Symbol Database
+   //--------------------------------------------------
+
+   for(int i=0;i<ArraySize(SymbolDB);i++)
+      FileReadStruct(handle,SymbolDB[i]);
+
+   FileClose(handle);
+
+   return true;
+}
+
+
+//----------------------------------------------------------
+// Backup Learning Database
+//----------------------------------------------------------
+bool BackupLearningDatabase()
+{
+   if(!FileIsExist(LearningDatabaseFile))
+      return false;
+
+   FileDelete(LearningBackupFile);
+
+   if(!FileCopy(LearningDatabaseFile,
+                LearningBackupFile,
+                FILE_REWRITE))
+      return false;
+
+   return true;
+}
+
+//----------------------------------------------------------
+// Verify Learning Database
+//----------------------------------------------------------
+bool VerifyLearningDatabase()
+{
+   //--------------------------------------------------
+   // Version
+   //--------------------------------------------------
+   if(LearningHeader.version != LEARNING_DATABASE_VERSION)
+      return false;
+
+   //--------------------------------------------------
+   // Pattern Database
+   //--------------------------------------------------
+   for(int i=0;i<ArraySize(PatternDB);i++)
+   {
+      if(PatternDB[i].patternID==0)
+         return false;
+
+      if(PatternDB[i].wins<0)
+         return false;
+
+      if(PatternDB[i].losses<0)
+         return false;
+
+      if(PatternDB[i].totalTrades<0)
+         return false;
+   }
+
+   return true;
+}
+
+
+//----------------------------------------------------------
+// Recover Learning Database
+//----------------------------------------------------------
+bool RecoverLearningDatabase()
+{
+   if(!FileIsExist(LearningBackupFile))
+      return false;
+
+   FileDelete(LearningDatabaseFile);
+
+   if(!FileCopy(LearningBackupFile,
+                LearningDatabaseFile,
+                FILE_REWRITE))
+      return false;
+
+   return LoadLearningDatabase();
+}
+
+//----------------------------------------------------------
+// Automatic Learning Save
+//----------------------------------------------------------
+void AutoSaveLearningDatabase()
+{
+   static datetime lastSave=0;
+
+   if(TimeCurrent()-lastSave<300)
+      return;
+
+   SaveLearningDatabase();
+
+   BackupLearningDatabase();
+
+   lastSave=TimeCurrent();
+}
+
+
+//----------------------------------------------------------
+// Export Learning Database
+//----------------------------------------------------------
+bool ExportLearningDatabase(string exportFile)
+{
+   if(exportFile=="")
+      return false;
+
+   if(!SaveLearningDatabase())
+      return false;
+
+   FileDelete(exportFile);
+
+   if(!FileCopy(LearningDatabaseFile,
+                exportFile,
+                FILE_REWRITE))
+      return false;
+
+   return true;
+}
+
+//----------------------------------------------------------
+// Import Learning Database
+//----------------------------------------------------------
+bool ImportLearningDatabase(string importFile)
+{
+   if(!FileIsExist(importFile))
+      return false;
+
+   FileDelete(LearningDatabaseFile);
+
+   if(!FileCopy(importFile,
+                LearningDatabaseFile,
+                FILE_REWRITE))
+      return false;
+
+   return LoadLearningDatabase();
+}
+
+//----------------------------------------------------------
+// Optimize Learning Database
+//----------------------------------------------------------
+void OptimizeLearningDatabase()
+{
+   MaintainLearningDatabase();
+
+   UpdateLearningDatabase();
+
+   SaveLearningDatabase();
+
+   BackupLearningDatabase();
+}
+
+//----------------------------------------------------------
+// Process Learning Engine
+//----------------------------------------------------------
+void ProcessLearningEngine()
+{
+   //--------------------------------------------------
+   // Process queued trades
+   //--------------------------------------------------
+   ProcessLearningQueue();
+
+   CleanLearningQueue();
+
+   //--------------------------------------------------
+   // Update intelligence
+   //--------------------------------------------------
+   UpdateLearningDatabase();
+
+   UpdateAdaptiveLearning();
+
+   PublishLearningIntelligence();
+
+   //--------------------------------------------------
+   // Verify integrity
+   //--------------------------------------------------
+   if(!VerifyLearningDatabase())
+   {
+      Print("Learning database corrupted.");
+
+      RecoverLearningDatabase();
+   }
+
+   //--------------------------------------------------
+   // Automatic save
+   //--------------------------------------------------
+   AutoSaveLearningDatabase();
+}
+
+//----------------------------------------------------------
+// Learning Transaction
+//----------------------------------------------------------
+struct LearningTransaction
+{
+   ulong       patternID;
+   ulong       liquidityID;
+
+   datetime    tradeTime;
+
+   double      profit;
+
+   double      rr;
+
+   bool        win;
+
+   bool        processed;
+};
+
+LearningTransaction TransactionQueue[];
+
+
+//----------------------------------------------------------
+// Queue Learning Transaction
+//----------------------------------------------------------
+void QueueLearningTransaction()
+{
+   int index = ArraySize(TransactionQueue);
+
+   ArrayResize(TransactionQueue,index+1);
+
+   TransactionQueue[index].patternID =
+      CurrentTrade.patternID;
+
+   TransactionQueue[index].liquidityID =
+      CurrentTrade.liquidityID;
+
+   TransactionQueue[index].tradeTime =
+      TimeCurrent();
+
+   TransactionQueue[index].profit =
+      CurrentTrade.realizedProfit;
+
+   TransactionQueue[index].rr =
+      CurrentTrade.realizedRR;
+
+   TransactionQueue[index].win =
+      (CurrentTrade.realizedProfit>=0);
+
+   TransactionQueue[index].processed=false;
+}
+
+//----------------------------------------------------------
+// Process Learning Queue
+//----------------------------------------------------------
+void ProcessLearningQueue()
+{
+   for(int i=0;i<ArraySize(TransactionQueue);i++)
+   {
+      if(TransactionQueue[i].processed)
+         continue;
+
+      RecordCompletedTrade();
+
+      TransactionQueue[i].processed=true;
+   }
+}
+
+
+//----------------------------------------------------------
+// Clean Transaction Queue
+//----------------------------------------------------------
+void CleanLearningQueue()
+{
+   for(int i=ArraySize(TransactionQueue)-1;i>=0;i--)
+   {
+      if(TransactionQueue[i].processed)
+      {
+         ArrayRemove(TransactionQueue,i);
+      }
+   }
+}
 
 
 
