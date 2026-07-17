@@ -7271,5 +7271,719 @@ datetime StructureLastUpdate(
 
 
 
+//+------------------------------------------------------------------+
+//| SECTION 21 : TRADE EXECUTION & TRADE MANAGEMENT ENGINE           |
+//+------------------------------------------------------------------+
+
+//----------------------------------------------------------
+// Trade Execution Status
+//----------------------------------------------------------
+enum ENUM_EXECUTION_STATUS
+{
+   EXECUTION_IDLE = 0,
+   EXECUTION_PENDING,
+   EXECUTION_SENT,
+   EXECUTION_FILLED,
+   EXECUTION_FAILED,
+   EXECUTION_CANCELLED
+};
+
+//----------------------------------------------------------
+// Trade Management Status
+//----------------------------------------------------------
+enum ENUM_TRADE_STAGE
+{
+   TRADE_WAITING = 0,
+   TRADE_ACTIVE,
+   TRADE_BREAK_EVEN,
+   TRADE_PARTIAL_1,
+   TRADE_PARTIAL_2,
+   TRADE_TRAILING,
+   TRADE_CLOSED
+};
+
+//----------------------------------------------------------
+// Complete Trade Request
+//----------------------------------------------------------
+struct TradeRequestData
+{
+   bool                 valid;
+
+   ENUM_ORDER_TYPE      orderType;
+
+   ENUM_TIMEFRAMES      timeframe;
+
+   double               entryPrice;
+
+   double               stopLoss;
+
+   double               takeProfit;
+
+   double               lotSize;
+
+   double               riskPercent;
+
+   double               rr;
+
+   ulong                patternID;
+
+   ulong                liquidityID;
+
+   datetime             signalTime;
+
+   string               symbol;
+};
+
+//----------------------------------------------------------
+// Active Trade Information
+//----------------------------------------------------------
+struct ActiveTradeData
+{
+   bool                 active;
+
+   ulong                ticket;
+
+   ulong                patternID;
+
+   ulong                liquidityID;
+
+   ENUM_TRADE_STAGE     stage;
+
+   ENUM_ORDER_TYPE      orderType;
+
+   double               entry;
+
+   double               stopLoss;
+
+   double               takeProfit;
+
+   double               initialRisk;
+
+   double               currentRR;
+
+   double               lots;
+
+   datetime             openTime;
+
+   bool                 breakEvenDone;
+
+   bool                 partial1Done;
+
+   bool                 partial2Done;
+
+   bool                 trailingActive;
+};
+
+//----------------------------------------------------------
+// Global Variables
+//----------------------------------------------------------
+TradeRequestData PendingTrade;
+
+ActiveTradeData CurrentTrade;
+
+ENUM_EXECUTION_STATUS ExecutionStatus = EXECUTION_IDLE;
+
+
+//----------------------------------------------------------
+// Reset Pending Trade
+//----------------------------------------------------------
+void ResetPendingTrade()
+{
+   ZeroMemory(PendingTrade);
+
+   PendingTrade.valid = false;
+}
+
+//----------------------------------------------------------
+// Receive Approved Trade
+//----------------------------------------------------------
+bool ReceiveTradeRequest(const TradeRequestData &request)
+{
+   ResetPendingTrade();
+
+   PendingTrade = request;
+
+   if(!PendingTrade.valid)
+      return false;
+
+   ExecutionStatus = EXECUTION_PENDING;
+
+   return true;
+}
+
+//----------------------------------------------------------
+// Broker Trading Allowed
+//----------------------------------------------------------
+bool IsBrokerTradingAllowed()
+{
+   if(!TerminalInfoInteger(TERMINAL_TRADE_ALLOWED))
+      return false;
+
+   if(!MQLInfoInteger(MQL_TRADE_ALLOWED))
+      return false;
+
+   if(AccountInfoInteger(ACCOUNT_TRADE_ALLOWED)==0)
+      return false;
+
+   return true;
+}
+
+//----------------------------------------------------------
+// Symbol Tradable
+//----------------------------------------------------------
+bool IsSymbolTradable(const string symbol)
+{
+   if(!SymbolSelect(symbol,true))
+      return false;
+
+   if(!SymbolInfoInteger(symbol,SYMBOL_SELECT))
+      return false;
+
+   if(SymbolInfoInteger(symbol,SYMBOL_TRADE_MODE)==SYMBOL_TRADE_MODE_DISABLED)
+      return false;
+
+   return true;
+}
+
+//----------------------------------------------------------
+// Market Open
+//----------------------------------------------------------
+bool IsMarketOpen(const string symbol)
+{
+   double bid=0;
+   double ask=0;
+
+   if(!SymbolInfoDouble(symbol,SYMBOL_BID,bid))
+      return false;
+
+   if(!SymbolInfoDouble(symbol,SYMBOL_ASK,ask))
+      return false;
+
+   if(bid<=0 || ask<=0)
+      return false;
+
+   return true;
+}
+
+//----------------------------------------------------------
+// Margin Check
+//----------------------------------------------------------
+bool HasEnoughMargin()
+{
+   double marginRequired=0.0;
+
+   ENUM_ORDER_TYPE type=PendingTrade.orderType;
+
+   double price=(type==ORDER_TYPE_BUY)?
+                 SymbolInfoDouble(PendingTrade.symbol,SYMBOL_ASK):
+                 SymbolInfoDouble(PendingTrade.symbol,SYMBOL_BID);
+
+   if(!OrderCalcMargin(type,
+                       PendingTrade.symbol,
+                       PendingTrade.lotSize,
+                       price,
+                       marginRequired))
+      return false;
+
+   if(AccountInfoDouble(ACCOUNT_MARGIN_FREE)<marginRequired)
+      return false;
+
+   return true;
+}
+
+//----------------------------------------------------------
+// Validate Trade Before Execution
+//----------------------------------------------------------
+bool ValidateExecution()
+{
+   if(!PendingTrade.valid)
+      return false;
+
+   if(!IsBrokerTradingAllowed())
+      return false;
+
+   if(!IsSymbolTradable(PendingTrade.symbol))
+      return false;
+
+   if(!IsMarketOpen(PendingTrade.symbol))
+      return false;
+
+   if(!HasEnoughMargin())
+      return false;
+
+   return true;
+}
+
+//----------------------------------------------------------
+// Execute Approved Trade
+//----------------------------------------------------------
+bool ExecuteTrade()
+{
+   if(!ValidateExecution())
+   {
+      ExecutionStatus = EXECUTION_FAILED;
+      return false;
+   }
+
+   MqlTradeRequest request;
+   MqlTradeResult  result;
+
+   ZeroMemory(request);
+   ZeroMemory(result);
+
+   request.action       = TRADE_ACTION_DEAL;
+   request.symbol       = PendingTrade.symbol;
+   request.volume       = PendingTrade.lotSize;
+   request.type         = PendingTrade.orderType;
+   request.sl           = NormalizeDouble(PendingTrade.stopLoss,_Digits);
+   request.tp           = NormalizeDouble(PendingTrade.takeProfit,_Digits);
+   request.deviation    = MaxSlippagePoints;
+   request.magic        = MagicNumber;
+   request.type_filling = ORDER_FILLING_FOK;
+   request.comment      = EAName;
+
+   if(PendingTrade.orderType==ORDER_TYPE_BUY)
+      request.price=SymbolInfoDouble(PendingTrade.symbol,SYMBOL_ASK);
+   else
+      request.price=SymbolInfoDouble(PendingTrade.symbol,SYMBOL_BID);
+
+   if(!OrderSend(request,result))
+   {
+      ExecutionStatus = EXECUTION_FAILED;
+      Print("OrderSend Failed : ",GetLastError());
+      return false;
+   }
+
+   if(result.retcode!=TRADE_RETCODE_DONE &&
+      result.retcode!=TRADE_RETCODE_DONE_PARTIAL)
+   {
+      ExecutionStatus = EXECUTION_FAILED;
+
+      Print("Trade Rejected : ",result.retcode);
+
+      return false;
+   }
+
+   ExecutionStatus=EXECUTION_FILLED;
+
+   CurrentTrade.active=true;
+   CurrentTrade.ticket=result.order;
+   CurrentTrade.patternID=PendingTrade.patternID;
+   CurrentTrade.liquidityID=PendingTrade.liquidityID;
+   CurrentTrade.orderType=PendingTrade.orderType;
+   CurrentTrade.entry=result.price;
+   CurrentTrade.stopLoss=PendingTrade.stopLoss;
+   CurrentTrade.takeProfit=PendingTrade.takeProfit;
+   CurrentTrade.lots=PendingTrade.lotSize;
+   CurrentTrade.stage=TRADE_ACTIVE;
+   CurrentTrade.openTime=TimeCurrent();
+
+   CurrentTrade.breakEvenDone=false;
+   CurrentTrade.partial1Done=false;
+   CurrentTrade.partial2Done=false;
+   CurrentTrade.trailingActive=false;
+
+   return true;
+}
+
+//----------------------------------------------------------
+// Trade Management Controller
+//----------------------------------------------------------
+void ManageActiveTrade()
+{
+   if(!CurrentTrade.active)
+      return;
+
+   if(!PositionSelectByTicket(CurrentTrade.ticket))
+   {
+      CurrentTrade.active=false;
+      CurrentTrade.stage=TRADE_CLOSED;
+      return;
+   }
+
+   ManageBreakEven();
+
+   ManagePartialTakeProfit();
+
+   ManageTrailingStop();
+
+   ManageDynamicTakeProfit();
+
+   ManageEmergencyExit();
+
+   UpdateTradeStatistics();
+}
+
+//----------------------------------------------------------
+// Break Even Manager
+//----------------------------------------------------------
+void ManageBreakEven()
+{
+   if(CurrentTrade.breakEvenDone)
+      return;
+
+   if(!EnableBreakEven)
+      return;
+
+   double entry=CurrentTrade.entry;
+
+   double sl=CurrentTrade.stopLoss;
+
+   double bid=SymbolInfoDouble(_Symbol,SYMBOL_BID);
+
+   double ask=SymbolInfoDouble(_Symbol,SYMBOL_ASK);
+
+   double risk=MathAbs(entry-sl);
+
+   if(CurrentTrade.orderType==ORDER_TYPE_BUY)
+   {
+      if(bid>=entry+risk)
+      {
+         ModifyPositionSL(CurrentTrade.ticket,
+                          entry,
+                          CurrentTrade.takeProfit);
+
+         CurrentTrade.breakEvenDone=true;
+
+         CurrentTrade.stage=TRADE_BREAK_EVEN;
+      }
+   }
+   else
+   {
+      if(ask<=entry-risk)
+      {
+         ModifyPositionSL(CurrentTrade.ticket,
+                          entry,
+                          CurrentTrade.takeProfit);
+
+         CurrentTrade.breakEvenDone=true;
+
+         CurrentTrade.stage=TRADE_BREAK_EVEN;
+      }
+   }
+}
+
+//----------------------------------------------------------
+// Partial Take Profit Manager
+//----------------------------------------------------------
+void ManagePartialTakeProfit()
+{
+   if(!EnablePartialTakeProfit)
+      return;
+
+   if(!PositionSelectByTicket(CurrentTrade.ticket))
+      return;
+
+   double bid=SymbolInfoDouble(_Symbol,SYMBOL_BID);
+   double ask=SymbolInfoDouble(_Symbol,SYMBOL_ASK);
+
+   double entry=CurrentTrade.entry;
+   double stop =CurrentTrade.stopLoss;
+
+   double risk=MathAbs(entry-stop);
+
+   double rr=0.0;
+
+   if(CurrentTrade.orderType==ORDER_TYPE_BUY)
+      rr=(bid-entry)/risk;
+   else
+      rr=(entry-ask)/risk;
+
+   //--------------------------------------------------
+   // TP1
+   //--------------------------------------------------
+   if(!CurrentTrade.partial1Done)
+   {
+      if(rr>=1.0)
+      {
+         ClosePartialPosition(CurrentTrade.ticket,
+                              TP1_ClosePercent);
+
+         CurrentTrade.partial1Done=true;
+
+         CurrentTrade.stage=TRADE_PARTIAL_1;
+
+         return;
+      }
+   }
+
+   //--------------------------------------------------
+   // TP2
+   //--------------------------------------------------
+   if(!CurrentTrade.partial2Done)
+   {
+      if(rr>=2.0)
+      {
+         ClosePartialPosition(CurrentTrade.ticket,
+                              TP2_ClosePercent);
+
+         CurrentTrade.partial2Done=true;
+
+         CurrentTrade.stage=TRADE_PARTIAL_2;
+
+         return;
+      }
+   }
+}
+
+
+//----------------------------------------------------------
+// Professional ICT Trailing Stop
+//----------------------------------------------------------
+void ManageTrailingStop()
+{
+   if(!EnableTrailingStop)
+      return;
+
+   if(!PositionSelectByTicket(CurrentTrade.ticket))
+      return;
+
+   double currentSL = PositionGetDouble(POSITION_SL);
+   double currentTP = PositionGetDouble(POSITION_TP);
+
+   double newSL = currentSL;
+
+   //--------------------------------------------------
+   // BUY Positions
+   //--------------------------------------------------
+   if(CurrentTrade.orderType==ORDER_TYPE_BUY)
+   {
+      double swingLow = GetLatestProtectedSwingLow();
+
+      if(swingLow<=0)
+         return;
+
+      double atr = GetATRValue();
+
+      newSL = swingLow - (atr * ATRStopMultiplier);
+
+      if(newSL > currentSL)
+      {
+         ModifyPositionSL(CurrentTrade.ticket,
+                          NormalizeDouble(newSL,_Digits),
+                          currentTP);
+
+         CurrentTrade.trailingActive=true;
+         CurrentTrade.stage=TRADE_TRAILING;
+      }
+   }
+
+   //--------------------------------------------------
+   // SELL Positions
+   //--------------------------------------------------
+   else
+   {
+      double swingHigh = GetLatestProtectedSwingHigh();
+
+      if(swingHigh<=0)
+         return;
+
+      double atr = GetATRValue();
+
+      newSL = swingHigh + (atr * ATRStopMultiplier);
+
+      if(currentSL==0 || newSL < currentSL)
+      {
+         ModifyPositionSL(CurrentTrade.ticket,
+                          NormalizeDouble(newSL,_Digits),
+                          currentTP);
+
+         CurrentTrade.trailingActive=true;
+         CurrentTrade.stage=TRADE_TRAILING;
+      }
+   }
+}
+
+
+//----------------------------------------------------------
+// Dynamic Exit Manager
+//----------------------------------------------------------
+void ManageDynamicTakeProfit()
+{
+   if(!PositionSelectByTicket(CurrentTrade.ticket))
+      return;
+
+   //--------------------------------------------------
+   // Trade already protected?
+   //--------------------------------------------------
+   if(!CurrentTrade.breakEvenDone)
+      return;
+
+   //--------------------------------------------------
+   // Strong opposite ICT pattern
+   //--------------------------------------------------
+   if(OppositePatternConfirmed(CurrentTrade.orderType))
+   {
+      CloseEntirePosition(CurrentTrade.ticket);
+
+      CurrentTrade.stage = TRADE_CLOSED;
+
+      return;
+   }
+
+   //--------------------------------------------------
+   // Market structure failure
+   //--------------------------------------------------
+   if(PositionStructureInvalid(CurrentTrade.orderType))
+   {
+      CloseEntirePosition(CurrentTrade.ticket);
+
+      CurrentTrade.stage = TRADE_CLOSED;
+
+      return;
+   }
+
+   //--------------------------------------------------
+   // Momentum completely exhausted
+   //--------------------------------------------------
+   if(MomentumExhausted(CurrentTrade.orderType))
+   {
+      CloseEntirePosition(CurrentTrade.ticket);
+
+      CurrentTrade.stage = TRADE_CLOSED;
+
+      return;
+   }
+}
+
+//----------------------------------------------------------
+// Emergency Protection
+//----------------------------------------------------------
+void ManageEmergencyExit()
+{
+   if(!PositionSelectByTicket(CurrentTrade.ticket))
+      return;
+
+   //--------------------------------------------------
+   // Spread explosion
+   //--------------------------------------------------
+   if(CurrentSpreadPoints() > MaxSpreadPoints * 2)
+      return;
+
+   //--------------------------------------------------
+   // Trading disabled
+   //--------------------------------------------------
+   if(!TerminalInfoInteger(TERMINAL_TRADE_ALLOWED))
+      return;
+
+   //--------------------------------------------------
+   // Account protection
+   //--------------------------------------------------
+   if(GetDailyLossPercent() >= DailyMaxLossPercent)
+   {
+      CloseEntirePosition(CurrentTrade.ticket);
+
+      CurrentTrade.stage = TRADE_CLOSED;
+
+      return;
+   }
+
+   //--------------------------------------------------
+   // Margin protection
+   //--------------------------------------------------
+   if(AccountInfoDouble(ACCOUNT_MARGIN_LEVEL) < 120.0)
+   {
+      CloseEntirePosition(CurrentTrade.ticket);
+
+      CurrentTrade.stage = TRADE_CLOSED;
+
+      return;
+   }
+}
+
+
+//----------------------------------------------------------
+// Update Trade Statistics
+//----------------------------------------------------------
+void UpdateTradeStatistics()
+{
+   if(PositionSelectByTicket(CurrentTrade.ticket))
+      return;
+
+   CurrentTrade.active = false;
+
+   CurrentTrade.stage = TRADE_CLOSED;
+
+   ExecutionStatus = EXECUTION_IDLE;
+
+   ResetPendingTrade();
+}
+
+//----------------------------------------------------------
+// Find Active Trade By Pattern
+//----------------------------------------------------------
+bool FindTradeByPattern(const ulong patternID)
+{
+   if(!CurrentTrade.active)
+      return false;
+
+   if(CurrentTrade.patternID != patternID)
+      return false;
+
+   if(!PositionSelectByTicket(CurrentTrade.ticket))
+      return false;
+
+   return true;
+}
+
+//----------------------------------------------------------
+// Is Pattern Still Active
+//----------------------------------------------------------
+bool PatternOwnsTrade(const ulong patternID)
+{
+   return FindTradeByPattern(patternID);
+}
+
+//----------------------------------------------------------
+// Release Pattern Ownership
+//----------------------------------------------------------
+void ReleaseTradeOwnership()
+{
+   CurrentTrade.patternID   = 0;
+   CurrentTrade.liquidityID = 0;
+}
+
+//----------------------------------------------------------
+// Trade Lifecycle
+//----------------------------------------------------------
+void ProcessTradeEngine()
+{
+   //--------------------------------------------------
+   // Execute New Trade
+   //--------------------------------------------------
+   if(ExecutionStatus == EXECUTION_PENDING)
+   {
+      ExecuteTrade();
+   }
+
+   //--------------------------------------------------
+   // Manage Existing Trade
+   //--------------------------------------------------
+   if(CurrentTrade.active)
+   {
+      ManageActiveTrade();
+   }
+
+   //--------------------------------------------------
+   // Cleanup
+   //--------------------------------------------------
+   if(!CurrentTrade.active &&
+      ExecutionStatus != EXECUTION_IDLE)
+   {
+      UpdateTradeStatistics();
+
+      ReleaseTradeOwnership();
+   }
+}
+
+
+
+
+
+
+
+
+
+
 
 
