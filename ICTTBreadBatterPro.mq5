@@ -10244,6 +10244,7 @@ void UpdateDashboard()
 
       Dashboard.needsRefresh=false;
    }
+   Performance.dashboardRefreshes++;
 }
 
 //----------------------------------------------------------
@@ -13811,6 +13812,178 @@ bool EmergencyStop()
 }
 
 
+//----------------------------------------------------------
+// Section 27: Production Optimizer
+//----------------------------------------------------------
+
+//----------------------------------------------------------
+// Performance Monitor
+//----------------------------------------------------------
+struct PerformanceMonitor
+{
+   ulong tickCount;
+
+   datetime startTime;
+
+   double averageTickTime;
+
+   double cpuLoad;
+
+   ulong dashboardRefreshes;
+
+   ulong adaptiveCycles;
+
+   ulong tradeDecisions;
+};
+
+PerformanceMonitor Performance;
 
 
+//----------------------------------------------------------
+// Initialize Performance Monitor
+//----------------------------------------------------------
+void InitializePerformanceMonitor()
+{
+   ZeroMemory(Performance);
+
+   Performance.startTime=TimeCurrent();
+}
+
+
+//----------------------------------------------------------
+// Update Tick Performance
+//----------------------------------------------------------
+void UpdatePerformance()
+{
+   Performance.tickCount++;
+}
+
+//----------------------------------------------------------
+// Memory Cleanup
+//----------------------------------------------------------
+void CleanupMemory()
+{
+   ArrayFree(SymbolMemory);
+
+   ArrayFree(ContextDatabase);
+
+   ArrayFree(OptimizationDB);
+}
+
+//----------------------------------------------------------
+// Cleanup Chart Objects
+//----------------------------------------------------------
+void CleanupChartObjects()
+{
+   ObjectsDeleteAll(
+      0,
+      "DHSP_");
+}
+
+//----------------------------------------------------------
+// Flush Files
+//----------------------------------------------------------
+void FlushLearningFiles()
+{
+   SaveAdaptiveMemory();
+
+   SaveDashboardPosition();
+}
+
+//----------------------------------------------------------
+// Production Shutdown
+//----------------------------------------------------------
+void ShutdownAllSystems()
+{
+   PrintPerformanceReport();
+
+   FlushLearningFiles();
+
+   CleanupChartObjects();
+
+   CleanupMemory();
+
+   EventKillTimer();
+
+   LogInfo(
+      "SYSTEM",
+      "Production Shutdown Complete");
+}
+
+//----------------------------------------------------------
+// Runtime Diagnostics
+//----------------------------------------------------------
+void RuntimeDiagnostics()
+{
+   if(!Validation.overallStatus)
+      return;
+
+   if(Performance.tickCount==0)
+      return;
+
+   Performance.averageTickTime=
+      (double)(TimeCurrent()-Performance.startTime)/
+      (double)Performance.tickCount;
+}
+
+
+//----------------------------------------------------------
+// Print Performance Report
+//----------------------------------------------------------
+void PrintPerformanceReport()
+{
+   Print("==============================");
+   Print(" DHSP PERFORMANCE REPORT");
+   Print("==============================");
+
+   Print("Ticks............... ",Performance.tickCount);
+
+   Print("Trade Decisions..... ",Performance.tradeDecisions);
+
+   Print("Adaptive Cycles..... ",Performance.adaptiveCycles);
+
+   Print("Dashboard Updates... ",Performance.dashboardRefreshes);
+
+   Print("Average Tick........ ",
+         DoubleToString(
+         Performance.averageTickTime,
+         4));
+
+   Print("==============================");
+}
+
+
+//----------------------------------------------------------
+// Final Health Check
+//----------------------------------------------------------
+bool FinalHealthCheck()
+{
+   if(!Validation.overallStatus)
+      return false;
+
+   if(!AdaptiveHealthy())
+      return false;
+
+   if(!BrokerTradingQualityGood())
+      return false;
+
+   if(AccountInfoDouble(ACCOUNT_BALANCE)<=0)
+      return false;
+
+   return true;
+}
+
+//----------------------------------------------------------
+// Production Ready
+//----------------------------------------------------------
+bool ProductionReady()
+{
+   if(!FinalHealthCheck())
+      return false;
+
+   if(!SystemReady())
+      return false;
+
+   return true;
+}
 
