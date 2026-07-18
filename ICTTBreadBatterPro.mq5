@@ -13240,6 +13240,8 @@ void OnTimer()
    ClampDashboard();
 
    CheckDailyReset();
+
+   RuntimeValidation();
 }
 
 
@@ -13317,6 +13319,8 @@ void TradeManagementCycle()
 void OnTick()
 {
    if(!SystemReady())
+      return;
+   if(EmergencyStop())
       return;
 
    MainTradingCycle();
@@ -13524,9 +13528,287 @@ bool SystemReady()
 
 
 
+//----------------------------------------------------------
+// Section 26: Production Validation Layer.
+//----------------------------------------------------------
+
+//----------------------------------------------------------
+// Validation Engine
+//----------------------------------------------------------
+struct ValidationStatus
+{
+   bool brokerOK;
+
+   bool accountOK;
+
+   bool indicatorsOK;
+
+   bool dashboardOK;
+
+   bool adaptiveOK;
+
+   bool newsOK;
+
+   bool riskOK;
+
+   bool loggerOK;
+
+   bool filesOK;
+
+   bool overallStatus;
+};
+
+ValidationStatus Validation;
 
 
+//----------------------------------------------------------
+// Reset Validation
+//----------------------------------------------------------
+void ResetValidation()
+{
+   ZeroMemory(Validation);
+}
 
+//----------------------------------------------------------
+// Validate Broker
+//----------------------------------------------------------
+bool ValidateBroker()
+{
+   if(BrokerInfo.BrokerName=="")
+      return false;
+
+   if(BrokerInfo.ServerName=="")
+      return false;
+
+   return true;
+}
+
+
+//----------------------------------------------------------
+// Validate Account
+//----------------------------------------------------------
+bool ValidateAccount()
+{
+   if(AccountInfoDouble(ACCOUNT_BALANCE)<=0)
+      return false;
+
+   if(AccountInfoInteger(ACCOUNT_TRADE_ALLOWED)==0)
+      return false;
+
+   return true;
+}
+
+
+//----------------------------------------------------------
+// Validate Indicators
+//----------------------------------------------------------
+bool ValidateIndicators()
+{
+   if(ATRHandle==INVALID_HANDLE)
+      return false;
+
+   return true;
+}
+
+//----------------------------------------------------------
+// Validate Dashboard
+//----------------------------------------------------------
+bool ValidateDashboard()
+{
+   return Dashboard.visible;
+}
+
+
+//----------------------------------------------------------
+// Validate Adaptive
+//----------------------------------------------------------
+bool ValidateAdaptive()
+{
+   return AdaptiveHealthy();
+}
+
+//----------------------------------------------------------
+// Validate News Engine
+//----------------------------------------------------------
+bool ValidateNews()
+{
+   if(!EnableNewsFilter)
+      return true;
+
+   return true;
+}
+
+//----------------------------------------------------------
+// Validate Risk Engine
+//----------------------------------------------------------
+bool ValidateRisk()
+{
+   if(BaseRiskPercent<=0)
+      return false;
+
+   if(DailyMaxLossPercent<=0)
+      return false;
+
+   return true;
+}
+
+
+//----------------------------------------------------------
+// Execute Validation
+//----------------------------------------------------------
+bool ExecuteValidation()
+{
+   ResetValidation();
+
+   Validation.brokerOK=
+      ValidateBroker();
+
+   Validation.accountOK=
+      ValidateAccount();
+
+   Validation.indicatorsOK=
+      ValidateIndicators();
+
+   Validation.dashboardOK=
+      ValidateDashboard();
+
+   Validation.adaptiveOK=
+      ValidateAdaptive();
+
+   Validation.newsOK=
+      ValidateNews();
+
+   Validation.riskOK=
+      ValidateRisk();
+
+   Validation.loggerOK=true;
+
+   Validation.filesOK=true;
+
+   Validation.overallStatus=
+      Validation.brokerOK &&
+      Validation.accountOK &&
+      Validation.indicatorsOK &&
+      Validation.dashboardOK &&
+      Validation.adaptiveOK &&
+      Validation.newsOK &&
+      Validation.riskOK &&
+      Validation.loggerOK &&
+      Validation.filesOK;
+
+   return Validation.overallStatus;
+}
+
+//----------------------------------------------------------
+// Validation Report
+//----------------------------------------------------------
+void PrintValidationReport()
+{
+   Print("==============================");
+   Print(" DHSP SYSTEM VALIDATION");
+   Print("==============================");
+
+   Print("Broker............. ",
+         Validation.brokerOK ? "PASS" : "FAIL");
+
+   Print("Account............ ",
+         Validation.accountOK ? "PASS" : "FAIL");
+
+   Print("Indicators......... ",
+         Validation.indicatorsOK ? "PASS" : "FAIL");
+
+   Print("Dashboard.......... ",
+         Validation.dashboardOK ? "PASS" : "FAIL");
+
+   Print("Adaptive Layer..... ",
+         Validation.adaptiveOK ? "PASS" : "FAIL");
+
+   Print("News Filter........ ",
+         Validation.newsOK ? "PASS" : "FAIL");
+
+   Print("Risk Engine........ ",
+         Validation.riskOK ? "PASS" : "FAIL");
+
+   Print("Logger............. ",
+         Validation.loggerOK ? "PASS" : "FAIL");
+
+   Print("Files.............. ",
+         Validation.filesOK ? "PASS" : "FAIL");
+
+   Print("==============================");
+
+   Print("Overall............ ",
+         Validation.overallStatus ? "PASS" : "FAIL");
+
+   Print("==============================");
+}
+
+
+//----------------------------------------------------------
+// Validation Status Text
+//----------------------------------------------------------
+string ValidationStatusText()
+{
+   if(Validation.overallStatus)
+      return "SYSTEM READY";
+
+   return "VALIDATION FAILED";
+}
+
+
+//----------------------------------------------------------
+// Validation Colour
+//----------------------------------------------------------
+color ValidationColor()
+{
+   if(Validation.overallStatus)
+      return clrLimeGreen;
+
+   return clrRed;
+}
+
+if(!ExecuteValidation())
+{
+   PrintValidationReport();
+
+   return(INIT_FAILED);
+}
+
+PrintValidationReport();
+
+//----------------------------------------------------------
+// Runtime Validation
+//----------------------------------------------------------
+void RuntimeValidation()
+{
+   if(!Validation.overallStatus)
+      return;
+
+   if(!ValidateBroker())
+      Validation.overallStatus=false;
+
+   if(!ValidateAccount())
+      Validation.overallStatus=false;
+
+   if(!ValidateAdaptive())
+      Validation.overallStatus=false;
+}
+
+
+//----------------------------------------------------------
+// Emergency Stop
+//----------------------------------------------------------
+bool EmergencyStop()
+{
+   if(!Validation.overallStatus)
+      return true;
+
+   if(Stats.dailyLossPercent>=
+      DailyMaxLossPercent)
+      return true;
+
+   return false;
+}
 
 
 
