@@ -13169,6 +13169,366 @@ void AdaptiveManager()
 
 
 
+//----------------------------------------------------------
+// Section 25: Final EA Integration
+//----------------------------------------------------------
+
+//----------------------------------------------------------
+// Initialize All Systems
+//----------------------------------------------------------
+bool InitializeAllSystems()
+{
+   LogInfo("SYSTEM","Initializing EA...");
+
+   // Core
+   InitializeBrokerInformation();
+   InitializeTradeStatistics();
+
+   // Risk
+   InitializeRiskManager();
+
+   // News
+   InitializeNewsFilter();
+
+   // Dashboard
+   LoadDashboardPosition();
+   DetectDashboardResolution();
+   ClampDashboard();
+   InitializeDashboard();
+
+   // Adaptive
+   InitializeAdaptiveParameters();
+   InitializeOptimizer();
+   InitializeBrokerLearning();
+   RecoverAdaptiveLearning();
+
+   LogInfo("SYSTEM","Initialization Complete");
+
+   return true;
+}
+
+
+//----------------------------------------------------------
+// Expert Initialization
+//----------------------------------------------------------
+int OnInit()
+{
+   if(!InitializeAllSystems())
+      return(INIT_FAILED);
+
+   EventSetTimer(1);
+
+   BuildDashboard();
+
+   return(INIT_SUCCEEDED);
+}
+
+
+//----------------------------------------------------------
+// Timer Event
+//----------------------------------------------------------
+void OnTimer()
+{
+   UpdateDashboard();
+
+   AdaptiveManager();
+
+   AdaptiveAutoSave();
+
+   DetectDashboardResolution();
+
+   ClampDashboard();
+
+   CheckDailyReset();
+}
+
+
+//----------------------------------------------------------
+// Main Tick Manager
+//----------------------------------------------------------
+void MainTradingCycle()
+{
+   // Update market data
+   UpdateMarketInformation();
+
+   // Update trend
+   UpdateTrendAnalysis();
+
+   // Update liquidity
+   UpdateLiquidityEngine();
+
+   // Update structure
+   UpdateStructureEngine();
+
+   // Update Premium / Discount
+   UpdatePremiumDiscount();
+
+   // Update Bread & Butter
+   UpdateBreadButterEngine();
+
+   // Update Session
+   UpdateSessionEngine();
+
+   // Update News
+   UpdateNewsEngine();
+}
+
+
+//----------------------------------------------------------
+// Trade Decision Cycle
+//----------------------------------------------------------
+void TradeDecisionCycle()
+{
+   if(!TradingAllowed())
+      return;
+
+   if(!AdaptiveTradeFilter())
+      return;
+
+   if(!NewsTradingAllowed())
+      return;
+
+   if(!SessionTradingAllowed())
+      return;
+
+   EvaluateTradeSignals();
+}
+
+//----------------------------------------------------------
+// Trade Management
+//----------------------------------------------------------
+void TradeManagementCycle()
+{
+   ManageOpenPositions();
+
+   ManageBreakEven();
+
+   ManageTrailingStops();
+
+   ManagePartialTakeProfit();
+
+   CheckDailyLossLimit();
+}
+
+
+//----------------------------------------------------------
+// Main Tick
+//----------------------------------------------------------
+void OnTick()
+{
+   if(!SystemReady())
+      return;
+
+   MainTradingCycle();
+
+   TradeDecisionCycle();
+
+   TradeManagementCycle();
+}
+
+//----------------------------------------------------------
+// Process Closed Trade
+//----------------------------------------------------------
+void ProcessClosedTrade(
+   ulong dealTicket)
+{
+   UpdateTradeStatistics(dealTicket);
+
+   UpdateAdaptiveStatistics(dealTicket);
+
+   UpdatePatternLearning(dealTicket);
+
+   UpdateContextLearning(dealTicket);
+
+   UpdateBrokerLearningFromDeal(dealTicket);
+
+   UpdateSymbolLearningFromDeal(dealTicket);
+
+   UpdateKnowledgeBase();
+
+   UpdateAdaptiveMemory();
+
+   BuildMasterAdaptiveScore();
+}
+
+
+//----------------------------------------------------------
+// Trade Transaction
+//----------------------------------------------------------
+void OnTradeTransaction(
+   const MqlTradeTransaction& trans,
+   const MqlTradeRequest& request,
+   const MqlTradeResult& result)
+{
+   if(trans.type!=TRADE_TRANSACTION_DEAL_ADD)
+      return;
+
+   if(!HistoryDealSelect(trans.deal))
+      return;
+
+   long entry=
+      HistoryDealGetInteger(
+      trans.deal,
+      DEAL_ENTRY);
+
+   if(entry!=DEAL_ENTRY_OUT)
+      return;
+
+   ProcessClosedTrade(
+      trans.deal);
+
+   UpdateDashboard();
+}
+
+//----------------------------------------------------------
+// Daily Reset
+//----------------------------------------------------------
+void CheckDailyReset()
+{
+   static int lastDay=-1;
+
+   MqlDateTime now;
+
+   TimeToStruct(
+      TimeCurrent(),
+      now);
+
+   if(now.day==lastDay)
+      return;
+
+   lastDay=now.day;
+
+   ResetDailyStatistics();
+
+   ResumeLearning();
+
+   LogInfo(
+      "SYSTEM",
+      "Daily Reset Complete");
+}
+
+
+//----------------------------------------------------------
+// Handle Dashboard Clicks
+//----------------------------------------------------------
+void HandleDashboardClick(string object)
+{
+   if(object=="DHSP_Minimize")
+   {
+      Dashboard.minimized=
+         !Dashboard.minimized;
+
+      BuildDashboard();
+
+      return;
+   }
+
+   if(object=="DHSP_Close")
+   {
+      Dashboard.visible=false;
+
+      BuildDashboard();
+
+      return;
+   }
+}
+
+
+//----------------------------------------------------------
+// Chart Event
+//----------------------------------------------------------
+void OnChartEvent(
+   const int id,
+   const long &lparam,
+   const double &dparam,
+   const string &sparam)
+{
+   switch(id)
+   {
+      case CHARTEVENT_OBJECT_CLICK:
+
+         HandleDashboardClick(sparam);
+
+         break;
+
+      case CHARTEVENT_MOUSE_MOVE:
+
+         if(DashboardPos.dragging)
+         {
+            DragDashboard(
+               (int)lparam,
+               (int)dparam);
+         }
+
+         break;
+
+      case CHARTEVENT_CLICK:
+
+         EndDashboardDrag();
+
+         break;
+
+      default:
+
+         break;
+   }
+}
+
+
+
+//----------------------------------------------------------
+// Shutdown Manager
+//----------------------------------------------------------
+void ShutdownAllSystems()
+{
+   SaveAdaptiveMemory();
+
+   SaveDashboardPosition();
+
+   EventKillTimer();
+
+   LogInfo(
+      "SYSTEM",
+      "EA Shutdown Complete");
+}
+
+
+//----------------------------------------------------------
+// Expert Deinitialization
+//----------------------------------------------------------
+void OnDeinit(const int reason)
+{
+   ShutdownAllSystems();
+
+   ObjectsDeleteAll(
+      0,
+      "DHSP_");
+}
+
+//----------------------------------------------------------
+// System Ready
+//----------------------------------------------------------
+bool SystemReady()
+{
+   if(!AdaptiveHealthy())
+      return false;
+
+   if(!TradingAllowed())
+      return false;
+
+   if(!BrokerTradingQualityGood())
+      return false;
+
+   return true;
+}
+
+
+
+
+
+
+
+
 
 
 
