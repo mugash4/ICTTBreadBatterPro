@@ -10794,8 +10794,520 @@ void DashboardService()
 }
 
 
+//----------------------------------------------------------
+// Dashboard Panel Metrics
+//----------------------------------------------------------
+struct DashboardPanelMetrics
+{
+   int left;
+   int top;
+
+   int width;
+   int height;
+
+   int currentRow;
+};
+
+DashboardPanelMetrics PanelMetrics[6];
+
+//----------------------------------------------------------
+// Initialize Panel Layout
+//----------------------------------------------------------
+void InitializeDashboardPanels()
+{
+   int w = DashboardStyle.panelWidth;
+   int h = DashboardStyle.panelHeight;
+
+   int x1 = Dashboard.x + DashboardStyle.margin;
+   int x2 = x1 + w + DashboardStyle.columnGap;
+
+   int y1 = Dashboard.y + DashboardStyle.headerHeight + DashboardStyle.margin;
+   int y2 = y1 + h + DashboardStyle.rowGap;
+   int y3 = y2 + h + DashboardStyle.rowGap;
+
+   PanelMetrics[0]={x1,y1,w,h,0}; // EA STATUS
+   PanelMetrics[1]={x2,y1,w,h,0}; // MARKET
+   PanelMetrics[2]={x1,y2,w,h,0}; // ICT
+   PanelMetrics[3]={x2,y2,w,h,0}; // TRADE
+   PanelMetrics[4]={x1,y3,w,h,0}; // LEARNING
+   PanelMetrics[5]={x2,y3,w,h,0}; // ACCOUNT
+}
 
 
+//----------------------------------------------------------
+// Get Next Dashboard Row
+//----------------------------------------------------------
+int GetDashboardRow(int panel)
+{
+   int row = PanelMetrics[panel].currentRow;
+
+   PanelMetrics[panel].currentRow++;
+
+   return row;
+}
+
+//----------------------------------------------------------
+// Reset Dashboard Rows
+//----------------------------------------------------------
+void ResetDashboardRows()
+{
+   for(int i=0;i<6;i++)
+      PanelMetrics[i].currentRow=0;
+}
+
+
+//----------------------------------------------------------
+// Draw Dashboard Line
+//----------------------------------------------------------
+void DrawDashboardLine(
+   int panel,
+   string id,
+   string caption,
+   string value,
+   color clr)
+{
+   int row = GetDashboardRow(panel);
+
+   int x =
+      PanelMetrics[panel].left+8;
+
+   int y =
+      PanelMetrics[panel].top+22+
+      row*18;
+
+   CreateDashboardLabel(
+      id,
+      x,
+      y,
+      caption+": "+value,
+      clr,
+      DashboardStyle.fontSize);
+}
+
+//----------------------------------------------------------
+// Begin Dashboard Refresh
+//----------------------------------------------------------
+void BeginDashboardRefresh()
+{
+   ResetDashboardRows();
+}
+
+//----------------------------------------------------------
+// Dashboard Themes
+//----------------------------------------------------------
+enum ENUM_DASHBOARD_THEME
+{
+   DASHBOARD_THEME_DARK = 0,
+   DASHBOARD_THEME_LIGHT
+};
+
+//----------------------------------------------------------
+// Dashboard Theme
+//----------------------------------------------------------
+struct DashboardTheme
+{
+   color background;
+
+   color panel;
+
+   color border;
+
+   color header;
+
+   color title;
+
+   color text;
+
+   color success;
+
+   color warning;
+
+   color danger;
+
+   color neutral;
+
+   string font;
+
+   int fontSize;
+
+   int titleSize;
+};
+
+DashboardTheme Theme;
+
+
+//----------------------------------------------------------
+// Load Dashboard Theme
+//----------------------------------------------------------
+void LoadDashboardTheme(
+   ENUM_DASHBOARD_THEME theme=
+   DASHBOARD_THEME_DARK)
+{
+   switch(theme)
+   {
+      case DASHBOARD_THEME_DARK:
+
+         Theme.background = clrBlack;
+
+         Theme.panel = C'25,25,25';
+
+         Theme.border = clrDimGray;
+
+         Theme.header = clrDarkSlateGray;
+
+         Theme.title = clrGold;
+
+         Theme.text = clrWhite;
+
+         Theme.success = clrLime;
+
+         Theme.warning = clrOrange;
+
+         Theme.danger = clrRed;
+
+         Theme.neutral = clrSilver;
+
+         Theme.font = "Segoe UI";
+
+         Theme.fontSize = 9;
+
+         Theme.titleSize = 10;
+
+         break;
+   }
+}
+
+
+//----------------------------------------------------------
+// Status Colour
+//----------------------------------------------------------
+color DashboardStatusColor(
+   string value)
+{
+   value=StringUpper(value);
+
+   if(value=="ACTIVE" ||
+      value=="GOOD" ||
+      value=="RUNNING" ||
+      value=="ENABLED" ||
+      value=="CONNECTED" ||
+      value=="ON")
+      return Theme.success;
+
+   if(value=="WARNING" ||
+      value=="WAITING")
+      return Theme.warning;
+
+   if(value=="ERROR" ||
+      value=="FAILED" ||
+      value=="BLOCKED" ||
+      value=="OFF" ||
+      value=="DISABLED")
+      return Theme.danger;
+
+   return Theme.text;
+}
+
+//----------------------------------------------------------
+// Default Dashboard Colour
+//----------------------------------------------------------
+color DashboardDefaultColor()
+{
+   return Theme.text;
+}
+
+//----------------------------------------------------------
+// Dashboard Diagnostics
+//----------------------------------------------------------
+struct DashboardDiagnostics
+{
+   bool backgroundOK;
+
+   bool panelsOK;
+
+   bool labelsOK;
+
+   bool buttonsOK;
+
+   bool layoutOK;
+
+   bool themeOK;
+
+   bool controlsOK;
+
+   bool initialized;
+};
+
+DashboardDiagnostics DashboardDiag;
+
+//----------------------------------------------------------
+// Dashboard Object Exists
+//----------------------------------------------------------
+bool DashboardObjectExists(string name)
+{
+   return(ObjectFind(
+      0,
+      DashboardObjectName(name))>=0);
+}
+
+//----------------------------------------------------------
+// Verify Panels
+//----------------------------------------------------------
+bool VerifyDashboardPanels()
+{
+   if(!DashboardObjectExists("EA_STATUS"))
+      return false;
+
+   if(!DashboardObjectExists("MARKET_STATUS"))
+      return false;
+
+   if(!DashboardObjectExists("ICT_ENGINE"))
+      return false;
+
+   if(!DashboardObjectExists("TRADE_ENGINE"))
+      return false;
+
+   if(!DashboardObjectExists("LEARNING"))
+      return false;
+
+   if(!DashboardObjectExists("ACCOUNT"))
+      return false;
+
+   return true;
+}
+
+
+//----------------------------------------------------------
+// Verify Dashboard Controls
+//----------------------------------------------------------
+bool VerifyDashboardControls()
+{
+   if(!DashboardObjectExists("BTN_MIN"))
+      return false;
+
+   if(!DashboardObjectExists("BTN_MAX"))
+      return false;
+
+   if(!DashboardObjectExists("BTN_HIDE"))
+      return false;
+
+   return true;
+}
+
+
+//----------------------------------------------------------
+// Run Dashboard Diagnostics
+//----------------------------------------------------------
+void RunDashboardDiagnostics()
+{
+   DashboardDiag.backgroundOK =
+      DashboardObjectExists("BACKGROUND");
+
+   DashboardDiag.panelsOK =
+      VerifyDashboardPanels();
+
+   DashboardDiag.controlsOK =
+      VerifyDashboardControls();
+
+   DashboardDiag.themeOK =
+      (Theme.font!="");
+
+   DashboardDiag.layoutOK =
+      (Dashboard.width>0 &&
+       Dashboard.height>0);
+
+   DashboardDiag.initialized =
+      DashboardDiag.backgroundOK &&
+      DashboardDiag.panelsOK &&
+      DashboardDiag.controlsOK &&
+      DashboardDiag.themeOK &&
+      DashboardDiag.layoutOK;
+}
+
+
+//----------------------------------------------------------
+// Dashboard Ready
+//----------------------------------------------------------
+bool DashboardReady()
+{
+   RunDashboardDiagnostics();
+
+   return DashboardDiag.initialized;
+}
+
+//----------------------------------------------------------
+// Recover Dashboard
+//----------------------------------------------------------
+void RecoverDashboard()
+{
+   DeleteDashboard();
+
+   InitializeDashboardTheme();
+
+   InitializeDashboardPanels();
+
+   BuildDashboard();
+
+   CreateDashboardControls();
+
+   Dashboard.needsRefresh=true;
+
+   AddNotification(
+      NOTIFY_WARNING,
+      "Dashboard Recovered");
+}
+
+
+//----------------------------------------------------------
+// Process Dashboard Recovery
+//----------------------------------------------------------
+void ProcessDashboardRecovery()
+{
+   static datetime lastCheck=0;
+
+   if(TimeCurrent()-lastCheck<5)
+      return;
+
+   lastCheck=TimeCurrent();
+
+   if(DashboardReady())
+      return;
+
+   RecoverDashboard();
+}
+
+
+//----------------------------------------------------------
+// Dashboard Integrity
+//----------------------------------------------------------
+bool DashboardIntegrityOK()
+{
+   return
+   (
+      DashboardDiag.backgroundOK &&
+      DashboardDiag.panelsOK &&
+      DashboardDiag.controlsOK &&
+      DashboardDiag.themeOK &&
+      DashboardDiag.layoutOK
+   );
+}
+
+//----------------------------------------------------------
+// Auto Repair Dashboard
+//----------------------------------------------------------
+void AutoRepairDashboard()
+{
+   RunDashboardDiagnostics();
+
+   if(DashboardIntegrityOK())
+      return;
+
+   LogWarning(
+      "Dashboard",
+      "Integrity failure detected");
+
+   RecoverDashboard();
+}
+
+//----------------------------------------------------------
+// Dashboard Supervisor
+//----------------------------------------------------------
+void DashboardSupervisor()
+{
+   ProcessDashboardRecovery();
+
+   AutoRepairDashboard();
+}
+
+//----------------------------------------------------------
+// Verify Dashboard Module
+//----------------------------------------------------------
+bool VerifyDashboardModule()
+{
+   RunDashboardDiagnostics();
+
+   if(!DashboardDiag.initialized)
+      return false;
+
+   if(!DashboardIntegrityOK())
+      return false;
+
+   if(!SystemState.systemHealthy)
+      return false;
+
+   return true;
+}
+
+
+//----------------------------------------------------------
+// Initialize Dashboard Module
+//----------------------------------------------------------
+bool InitializeDashboardModule()
+{
+   LoadDashboardTheme();
+
+   LoadDashboardPosition();
+
+   InitializeDashboardPanels();
+
+   BuildDashboard();
+
+   CreateDashboardControls();
+
+   RunDashboardDiagnostics();
+
+   Dashboard.initialized=
+      VerifyDashboardModule();
+
+   if(Dashboard.initialized)
+   {
+      LogInfo(
+         "Dashboard",
+         "Dashboard Module Ready");
+
+      AddNotification(
+         NOTIFY_SUCCESS,
+         "Dashboard Ready");
+   }
+   else
+   {
+      LogCritical(
+         "Dashboard",
+         "Dashboard Initialization Failed");
+
+      AddNotification(
+         NOTIFY_ERROR,
+         "Dashboard Failed");
+   }
+
+   return Dashboard.initialized;
+}
+
+//----------------------------------------------------------
+// Dashboard Maintenance
+//----------------------------------------------------------
+void DashboardMaintenance()
+{
+   DashboardSupervisor();
+
+   ProcessNotifications();
+
+   ProcessLogger();
+
+   ProcessHealthMonitor();
+
+   ProcessHealthAlerts();
+
+   DashboardService();
+}
+
+//----------------------------------------------------------
+// Dashboard Ready
+//----------------------------------------------------------
+bool DashboardModuleReady()
+{
+   return Dashboard.initialized;
+}
 
 
 
