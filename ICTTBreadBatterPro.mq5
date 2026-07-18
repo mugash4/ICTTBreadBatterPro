@@ -11311,6 +11311,1863 @@ bool DashboardModuleReady()
 
 
 
+//----------------------------------------------------------
+// Adaptive State
+//----------------------------------------------------------
+enum ENUM_ADAPTIVE_STATE
+{
+   ADAPTIVE_OFF = 0,
+
+   ADAPTIVE_OBSERVING,
+
+   ADAPTIVE_ANALYZING,
+
+   ADAPTIVE_OPTIMIZING,
+
+   ADAPTIVE_STABLE
+};
+
+
+//----------------------------------------------------------
+// Adaptive Core
+//----------------------------------------------------------
+struct AdaptiveEngine
+{
+   ENUM_ADAPTIVE_STATE state;
+
+   bool enabled;
+
+   bool optimizationAllowed;
+
+   bool emergencyMode;
+
+   bool collectingData;
+
+   datetime lastOptimization;
+
+   int optimizationCycle;
+
+   double confidence;
+
+   double stability;
+
+   double learningScore;
+};
+
+AdaptiveEngine Adaptive;
+
+
+//----------------------------------------------------------
+// Initialize Adaptive Layer
+//----------------------------------------------------------
+void InitializeAdaptiveLayer()
+{
+   Adaptive.enabled=true;
+
+   Adaptive.collectingData=true;
+
+   Adaptive.optimizationAllowed=false;
+
+   Adaptive.emergencyMode=false;
+
+   Adaptive.state=ADAPTIVE_OBSERVING;
+
+   Adaptive.confidence=0.0;
+
+   Adaptive.learningScore=0.0;
+
+   Adaptive.stability=100.0;
+
+   Adaptive.optimizationCycle=0;
+}
+
+//----------------------------------------------------------
+// Adaptive Performance
+//----------------------------------------------------------
+struct AdaptivePerformance
+{
+   int totalTrades;
+
+   int winningTrades;
+
+   int losingTrades;
+
+   double winRate;
+
+   double averageRR;
+
+   double averageProfit;
+
+   double averageLoss;
+
+   double profitFactor;
+
+   double expectancy;
+
+   double drawdown;
+
+   double recoveryFactor;
+};
+
+AdaptivePerformance AdaptiveStats;
+
+
+//----------------------------------------------------------
+// Update Adaptive Statistics
+//----------------------------------------------------------
+void UpdateAdaptiveStatistics()
+{
+   AdaptiveStats.totalTrades =
+      Stats.totalTrades;
+
+   AdaptiveStats.winningTrades =
+      Stats.winningTrades;
+
+   AdaptiveStats.losingTrades =
+      Stats.losingTrades;
+
+   AdaptiveStats.winRate =
+      Stats.winRate;
+
+   AdaptiveStats.averageRR =
+      Stats.averageRR;
+
+   AdaptiveStats.averageProfit =
+      Stats.averageProfit;
+
+   AdaptiveStats.averageLoss =
+      Stats.averageLoss;
+
+   AdaptiveStats.profitFactor =
+      Stats.profitFactor;
+
+   AdaptiveStats.expectancy =
+      Stats.expectancy;
+
+   AdaptiveStats.drawdown =
+      Stats.maxDrawdown;
+
+   AdaptiveStats.recoveryFactor =
+      Stats.recoveryFactor;
+}
+
+//----------------------------------------------------------
+// Calculate Confidence
+//----------------------------------------------------------
+void CalculateAdaptiveConfidence()
+{
+   double confidence = 0.0;
+
+   confidence += AdaptiveStats.winRate * 0.35;
+
+   confidence += AdaptiveStats.profitFactor * 20.0;
+
+   confidence += AdaptiveStats.expectancy * 15.0;
+
+   confidence -= AdaptiveStats.drawdown;
+
+   confidence =
+      MathMax(0.0,
+      MathMin(100.0,
+      confidence));
+
+   Adaptive.confidence =
+      confidence;
+}
+
+
+//----------------------------------------------------------
+// Update Adaptive State
+//----------------------------------------------------------
+void UpdateAdaptiveState()
+{
+   if(AdaptiveStats.totalTrades < 20)
+   {
+      Adaptive.state =
+         ADAPTIVE_OBSERVING;
+
+      return;
+   }
+
+   if(Adaptive.confidence < 50)
+   {
+      Adaptive.state =
+         ADAPTIVE_ANALYZING;
+
+      return;
+   }
+
+   if(Adaptive.optimizationAllowed)
+   {
+      Adaptive.state =
+         ADAPTIVE_OPTIMIZING;
+
+      return;
+   }
+
+   Adaptive.state =
+      ADAPTIVE_STABLE;
+}
+
+//----------------------------------------------------------
+// Pattern Performance
+//----------------------------------------------------------
+struct PatternPerformance
+{
+   string name;
+
+   int trades;
+
+   int wins;
+
+   int losses;
+
+   double winRate;
+
+   double profit;
+
+   double averageRR;
+
+   double confidence;
+
+   bool enabled;
+  //==========================
+   // Adaptive Intelligence
+   //==========================
+
+   ENUM_PATTERN_PRIORITY priority;
+
+   double weight;
+
+   double recentWinRate;
+
+   double longTermWinRate;
+
+   int consecutiveWins;
+
+   int consecutiveLosses;
+
+};
+
+PatternPerformance PatternDB[];
+
+
+
+//----------------------------------------------------------
+// Register Pattern Result
+//----------------------------------------------------------
+void RegisterPatternResult(
+   string pattern,
+   bool win,
+   double profit,
+   double rr)
+{
+   int total=ArraySize(PatternDB);
+
+   int index=-1;
+
+   for(int i=0;i<total;i++)
+   {
+      if(PatternDB[i].name==pattern)
+      {
+         index=i;
+         break;
+      }
+   }
+
+   if(index==-1)
+   {
+      ArrayResize(PatternDB,total+1);
+
+      index=total;
+
+      PatternDB[index].name=pattern;
+
+      PatternDB[index].enabled=true;
+   }
+
+   PatternDB[index].trades++;
+
+   if(win)
+      PatternDB[index].wins++;
+   else
+      PatternDB[index].losses++;
+
+   PatternDB[index].profit+=profit;
+
+   PatternDB[index].averageRR=
+      ((PatternDB[index].averageRR*
+      (PatternDB[index].trades-1))+rr)/
+      PatternDB[index].trades;
+
+   PatternDB[index].winRate=
+      100.0*
+      PatternDB[index].wins/
+      PatternDB[index].trades;
+}
+
+//----------------------------------------------------------
+// Calculate Pattern Confidence
+//----------------------------------------------------------
+void UpdatePatternConfidence()
+{
+   int total=ArraySize(PatternDB);
+
+   for(int i=0;i<total;i++)
+   {
+      double confidence=0;
+
+      confidence+=PatternDB[i].winRate*0.6;
+
+      confidence+=PatternDB[i].averageRR*20;
+
+      confidence+=MathMin(
+         PatternDB[i].trades,
+         50);
+
+      PatternDB[i].confidence=
+         MathMin(100.0,confidence);
+   }
+}
+
+//----------------------------------------------------------
+// Get Best Pattern
+//----------------------------------------------------------
+int GetBestPattern()
+{
+   int best=-1;
+
+   double highest=-1;
+
+   for(int i=0;i<ArraySize(PatternDB);i++)
+   {
+      if(PatternDB[i].confidence>highest)
+      {
+         highest=
+            PatternDB[i].confidence;
+
+         best=i;
+      }
+   }
+
+   return best;
+}
+
+//----------------------------------------------------------
+// Detect Weak Patterns
+//----------------------------------------------------------
+void EvaluatePatterns()
+{
+   for(int i=0;i<ArraySize(PatternDB);i++)
+   {
+      if(PatternDB[i].trades<15)
+         continue;
+
+      if(PatternDB[i].winRate<35.0)
+      {
+         PatternDB[i].enabled=false;
+
+         LogWarning(
+            "Adaptive",
+            PatternDB[i].name+
+            " disabled");
+      }
+      else
+      {
+         PatternDB[i].enabled=true;
+      }
+   }
+}
+
+//----------------------------------------------------------
+// Pattern Priority
+//----------------------------------------------------------
+enum ENUM_PATTERN_PRIORITY
+{
+   PRIORITY_LOW = 0,
+
+   PRIORITY_MEDIUM,
+
+   PRIORITY_HIGH,
+
+   PRIORITY_PREFERRED
+};
+
+
+//----------------------------------------------------------
+// Update Pattern Priority
+//----------------------------------------------------------
+void UpdatePatternPriority()
+{
+   for(int i=0;i<ArraySize(PatternDB);i++)
+   {
+      double score=PatternDB[i].confidence;
+
+      if(score>=85)
+      {
+         PatternDB[i].priority=
+            PRIORITY_PREFERRED;
+
+         PatternDB[i].weight=1.00;
+      }
+      else
+      if(score>=70)
+      {
+         PatternDB[i].priority=
+            PRIORITY_HIGH;
+
+         PatternDB[i].weight=0.90;
+      }
+      else
+      if(score>=50)
+      {
+         PatternDB[i].priority=
+            PRIORITY_MEDIUM;
+
+         PatternDB[i].weight=0.75;
+      }
+      else
+      {
+         PatternDB[i].priority=
+            PRIORITY_LOW;
+
+         PatternDB[i].weight=0.60;
+      }
+   }
+}
+
+
+//----------------------------------------------------------
+// Pattern Allowed
+//----------------------------------------------------------
+bool PatternAllowed(string pattern)
+{
+   for(int i=0;i<ArraySize(PatternDB);i++)
+   {
+      if(PatternDB[i].name!=pattern)
+         continue;
+
+      return PatternDB[i].weight>=0.60;
+   }
+
+   return true;
+}
+
+
+//----------------------------------------------------------
+// Adaptive Recommendation
+//----------------------------------------------------------
+double GetPatternWeight(string pattern)
+{
+   for(int i=0;i<ArraySize(PatternDB);i++)
+   {
+      if(PatternDB[i].name==pattern)
+         return PatternDB[i].weight;
+   }
+
+   return 1.0;
+}
+
+//----------------------------------------------------------
+// Market Context Performance
+//----------------------------------------------------------
+struct MarketContextPerformance
+{
+   ENUM_MARKET_PHASE phase;
+
+   ENUM_TRADING_SESSION session;
+
+   int trades;
+
+   int wins;
+
+   int losses;
+
+   double winRate;
+
+   double averageRR;
+
+   double profitFactor;
+
+   double confidence;
+};
+
+MarketContextPerformance ContextDB[];
+
+
+//----------------------------------------------------------
+// Register Context Result
+//----------------------------------------------------------
+void RegisterContextResult(
+   ENUM_MARKET_PHASE phase,
+   ENUM_TRADING_SESSION session,
+   bool win,
+   double rr,
+   double profit)
+{
+   int index=-1;
+
+   for(int i=0;i<ArraySize(ContextDB);i++)
+   {
+      if(ContextDB[i].phase==phase &&
+         ContextDB[i].session==session)
+      {
+         index=i;
+         break;
+      }
+   }
+
+   if(index==-1)
+   {
+      int total=ArraySize(ContextDB);
+
+      ArrayResize(ContextDB,total+1);
+
+      index=total;
+
+      ContextDB[index].phase=phase;
+      ContextDB[index].session=session;
+   }
+
+   ContextDB[index].trades++;
+
+   if(win)
+      ContextDB[index].wins++;
+   else
+      ContextDB[index].losses++;
+
+   ContextDB[index].averageRR=
+      ((ContextDB[index].averageRR*
+      (ContextDB[index].trades-1))+rr)/
+      ContextDB[index].trades;
+
+   ContextDB[index].winRate=
+      100.0*
+      ContextDB[index].wins/
+      ContextDB[index].trades;
+}
+
+//----------------------------------------------------------
+// Update Context Confidence
+//----------------------------------------------------------
+void UpdateContextConfidence()
+{
+   for(int i=0;i<ArraySize(ContextDB);i++)
+   {
+      double score=0.0;
+
+      score+=ContextDB[i].winRate*0.7;
+
+      score+=ContextDB[i].averageRR*15.0;
+
+      score+=MathMin(
+         ContextDB[i].trades,
+         40);
+
+      ContextDB[i].confidence=
+         MathMin(100.0,score);
+   }
+}
+
+//----------------------------------------------------------
+// Current Context Confidence
+//----------------------------------------------------------
+double GetCurrentContextConfidence(
+   ENUM_MARKET_PHASE phase,
+   ENUM_TRADING_SESSION session)
+{
+   for(int i=0;i<ArraySize(ContextDB);i++)
+   {
+      if(ContextDB[i].phase==phase &&
+         ContextDB[i].session==session)
+      {
+         return ContextDB[i].confidence;
+      }
+   }
+
+   return 50.0;
+}
+
+//----------------------------------------------------------
+// Build Adaptive Decision
+//----------------------------------------------------------
+void BuildAdaptiveDecision()
+{
+   ResetAdaptiveDecision();
+
+   AdaptiveDecision.liquidityScore =
+      LiquidityConfidence();
+
+   AdaptiveDecision.structureScore =
+      StructureConfidence();
+
+   AdaptiveDecision.premiumDiscountScore =
+      PDProfile.confidence;
+
+   AdaptiveDecision.sessionScore =
+      SessionConfidence();
+
+   int bestSetup =
+      BestBreadButterSetup();
+
+   if(bestSetup>=0)
+      AdaptiveDecision.breadButterScore =
+         BreadButterTF[bestSetup].confidence;
+   else
+      AdaptiveDecision.breadButterScore = 0.0;
+}
+
+
+//----------------------------------------------------------
+// Overall Adaptive Confidence
+//----------------------------------------------------------
+void CalculateAdaptiveDecisionConfidence()
+{
+   double score=0.0;
+
+   score += AdaptiveDecision.liquidityScore * 0.20;
+
+   score += AdaptiveDecision.structureScore * 0.25;
+
+   score += AdaptiveDecision.premiumDiscountScore * 0.15;
+
+   score += AdaptiveDecision.sessionScore * 0.15;
+
+   score += AdaptiveDecision.breadButterScore * 0.25;
+
+   AdaptiveDecision.overallConfidence =
+      MathMin(score,100.0);
+}
+
+
+//----------------------------------------------------------
+// Adaptive Optimizer
+//----------------------------------------------------------
+struct AdaptiveOptimizer
+{
+   bool enabled;
+
+   bool learning;
+
+   bool optimizing;
+
+   bool rollbackRequired;
+
+   int optimizationCount;
+
+   datetime lastOptimization;
+
+   double previousConfidence;
+
+   double currentConfidence;
+
+   double improvement;
+};
+
+AdaptiveOptimizer Optimizer;
+
+//----------------------------------------------------------
+// Initialize Optimizer
+//----------------------------------------------------------
+void InitializeOptimizer()
+{
+   Optimizer.enabled=true;
+
+   Optimizer.learning=true;
+
+   Optimizer.optimizing=false;
+
+   Optimizer.rollbackRequired=false;
+
+   Optimizer.optimizationCount=0;
+
+   Optimizer.improvement=0.0;
+}
+
+
+//----------------------------------------------------------
+// Measure Improvement
+//----------------------------------------------------------
+void MeasureAdaptiveImprovement()
+{
+   Optimizer.previousConfidence=
+      Optimizer.currentConfidence;
+
+   Optimizer.currentConfidence=
+      AdaptiveDecision.overallConfidence;
+
+   Optimizer.improvement=
+      Optimizer.currentConfidence-
+      Optimizer.previousConfidence;
+}
+
+//----------------------------------------------------------
+// Optimization Permission
+//----------------------------------------------------------
+bool OptimizationAllowed()
+{
+   if(!Optimizer.enabled)
+      return false;
+
+   if(AdaptiveStats.totalTrades<20)
+      return false;
+
+   if(AdaptiveDecision.overallConfidence<55.0)
+      return false;
+
+   if(Stats.maxDrawdown>DailyMaxLossPercent)
+      return false;
+
+   return true;
+}
+
+//----------------------------------------------------------
+// Adaptive Parameters
+//----------------------------------------------------------
+struct AdaptiveParameters
+{
+   double confidenceThreshold;
+
+   double minimumRR;
+
+   double liquidityWeight;
+
+   double structureWeight;
+
+   double sessionWeight;
+
+   double pdWeight;
+
+   double breadButterWeight;
+
+   double riskMultiplier;
+};
+
+AdaptiveParameters AdaptiveParam;
+
+
+//----------------------------------------------------------
+// Initialize Adaptive Parameters
+//----------------------------------------------------------
+void InitializeAdaptiveParameters()
+{
+   AdaptiveParam.confidenceThreshold = 70.0;
+
+   AdaptiveParam.minimumRR = 2.0;
+
+   AdaptiveParam.liquidityWeight = 1.00;
+
+   AdaptiveParam.structureWeight = 1.00;
+
+   AdaptiveParam.sessionWeight = 1.00;
+
+   AdaptiveParam.pdWeight = 1.00;
+
+   AdaptiveParam.breadButterWeight = 1.00;
+
+   AdaptiveParam.riskMultiplier = 1.00;
+}
+
+
+//----------------------------------------------------------
+// Optimize Confidence Threshold
+//----------------------------------------------------------
+void OptimizeConfidenceThreshold()
+{
+   if(AdaptiveStats.winRate > 70.0)
+   {
+      AdaptiveParam.confidenceThreshold =
+         MathMax(60.0,
+         AdaptiveParam.confidenceThreshold-1.0);
+   }
+   else
+   if(AdaptiveStats.winRate < 50.0)
+   {
+      AdaptiveParam.confidenceThreshold =
+         MathMin(85.0,
+         AdaptiveParam.confidenceThreshold+1.0);
+   }
+}
+
+//----------------------------------------------------------
+// Optimize Risk Multiplier
+//----------------------------------------------------------
+void OptimizeRiskMultiplier()
+{
+   AdaptiveParam.riskMultiplier = 1.0;
+
+   if(AdaptiveStats.drawdown > 10.0)
+      AdaptiveParam.riskMultiplier = 0.75;
+
+   if(AdaptiveStats.drawdown > 15.0)
+      AdaptiveParam.riskMultiplier = 0.50;
+
+   if(AdaptiveStats.winRate > 75.0 &&
+      AdaptiveStats.drawdown < 5.0)
+      AdaptiveParam.riskMultiplier = 1.10;
+}
+
+//----------------------------------------------------------
+//----------------------------------------------------------
+// Execute Safe Adaptive Optimization
+//----------------------------------------------------------
+void ExecuteAdaptiveOptimization()
+{
+   if(!OptimizationAllowed())
+      return;
+
+   SaveAdaptiveSnapshot();
+
+   OptimizeConfidenceThreshold();
+
+   OptimizeRiskMultiplier();
+
+   MeasureAdaptiveImprovement();
+
+   CheckOptimizationResult();
+
+   Optimizer.optimizationCount++;
+
+   Optimizer.lastOptimization=
+      TimeCurrent();
+}
+
+//----------------------------------------------------------
+// Adaptive Snapshot
+//----------------------------------------------------------
+struct AdaptiveSnapshot
+{
+   double confidenceThreshold;
+
+   double minimumRR;
+
+   double liquidityWeight;
+
+   double structureWeight;
+
+   double sessionWeight;
+
+   double pdWeight;
+
+   double breadButterWeight;
+
+   double riskMultiplier;
+
+   datetime snapshotTime;
+};
+
+AdaptiveSnapshot LastSnapshot;
+
+//----------------------------------------------------------
+// Save Adaptive Snapshot
+//----------------------------------------------------------
+void SaveAdaptiveSnapshot()
+{
+   LastSnapshot.confidenceThreshold =
+      AdaptiveParam.confidenceThreshold;
+
+   LastSnapshot.minimumRR =
+      AdaptiveParam.minimumRR;
+
+   LastSnapshot.liquidityWeight =
+      AdaptiveParam.liquidityWeight;
+
+   LastSnapshot.structureWeight =
+      AdaptiveParam.structureWeight;
+
+   LastSnapshot.sessionWeight =
+      AdaptiveParam.sessionWeight;
+
+   LastSnapshot.pdWeight =
+      AdaptiveParam.pdWeight;
+
+   LastSnapshot.breadButterWeight =
+      AdaptiveParam.breadButterWeight;
+
+   LastSnapshot.riskMultiplier =
+      AdaptiveParam.riskMultiplier;
+
+   LastSnapshot.snapshotTime =
+      TimeCurrent();
+}
+
+
+//----------------------------------------------------------
+// Restore Adaptive Snapshot
+//----------------------------------------------------------
+void RestoreAdaptiveSnapshot()
+{
+   AdaptiveParam.confidenceThreshold =
+      LastSnapshot.confidenceThreshold;
+
+   AdaptiveParam.minimumRR =
+      LastSnapshot.minimumRR;
+
+   AdaptiveParam.liquidityWeight =
+      LastSnapshot.liquidityWeight;
+
+   AdaptiveParam.structureWeight =
+      LastSnapshot.structureWeight;
+
+   AdaptiveParam.sessionWeight =
+      LastSnapshot.sessionWeight;
+
+   AdaptiveParam.pdWeight =
+      LastSnapshot.pdWeight;
+
+   AdaptiveParam.breadButterWeight =
+      LastSnapshot.breadButterWeight;
+
+   AdaptiveParam.riskMultiplier =
+      LastSnapshot.riskMultiplier;
+}
+
+//----------------------------------------------------------
+// Check Optimization Result
+//----------------------------------------------------------
+void CheckOptimizationResult()
+{
+   if(Optimizer.improvement >= 0.0)
+      return;
+
+   RestoreAdaptiveSnapshot();
+
+   Optimizer.rollbackRequired=false;
+
+   LogWarning(
+      "Adaptive",
+      "Optimization Rolled Back");
+}
+
+
+//----------------------------------------------------------
+// Optimization History
+//----------------------------------------------------------
+#define MAX_OPTIMIZATION_HISTORY 50
+
+struct OptimizationHistory
+{
+   datetime timestamp;
+
+   double confidence;
+
+   double winRate;
+
+   double profitFactor;
+
+   double drawdown;
+
+   double riskMultiplier;
+
+   double confidenceThreshold;
+
+   bool successful;
+};
+
+OptimizationHistory OptimizationDB[MAX_OPTIMIZATION_HISTORY];
+
+int OptimizationCount=0;
+
+
+//----------------------------------------------------------
+// Save Optimization Record
+//----------------------------------------------------------
+void SaveOptimizationRecord(bool success)
+{
+   int index=
+      OptimizationCount%
+      MAX_OPTIMIZATION_HISTORY;
+
+   OptimizationDB[index].timestamp=
+      TimeCurrent();
+
+   OptimizationDB[index].confidence=
+      AdaptiveDecision.overallConfidence;
+
+   OptimizationDB[index].winRate=
+      AdaptiveStats.winRate;
+
+   OptimizationDB[index].profitFactor=
+      AdaptiveStats.profitFactor;
+
+   OptimizationDB[index].drawdown=
+      AdaptiveStats.drawdown;
+
+   OptimizationDB[index].riskMultiplier=
+      AdaptiveParam.riskMultiplier;
+
+   OptimizationDB[index].confidenceThreshold=
+      AdaptiveParam.confidenceThreshold;
+
+   OptimizationDB[index].successful=
+      success;
+
+   OptimizationCount++;
+}
+
+
+//----------------------------------------------------------
+// Get Best Optimization
+//----------------------------------------------------------
+int BestOptimization()
+{
+   int best=-1;
+
+   double score=-9999;
+
+   int total=
+      MathMin(
+      OptimizationCount,
+      MAX_OPTIMIZATION_HISTORY);
+
+   for(int i=0;i<total;i++)
+   {
+      if(!OptimizationDB[i].successful)
+         continue;
+
+      double current=
+         OptimizationDB[i].profitFactor*
+         OptimizationDB[i].confidence-
+         OptimizationDB[i].drawdown;
+
+      if(current>score)
+      {
+         score=current;
+         best=i;
+      }
+   }
+
+   return best;
+}
+
+//----------------------------------------------------------
+// Restore Best Optimization
+//----------------------------------------------------------
+void RestoreBestOptimization()
+{
+   int best=
+      BestOptimization();
+
+   if(best<0)
+      return;
+
+   AdaptiveParam.confidenceThreshold=
+      OptimizationDB[best].confidenceThreshold;
+
+   AdaptiveParam.riskMultiplier=
+      OptimizationDB[best].riskMultiplier;
+
+   LogInfo(
+      "Adaptive",
+      "Best Optimization Restored");
+}
+
+
+//----------------------------------------------------------
+// Adaptive Memory
+//----------------------------------------------------------
+void UpdateAdaptiveMemory()
+{
+   bool success=
+      Optimizer.improvement>=0.0;
+
+   SaveOptimizationRecord(success);
+
+   if(!success)
+      RestoreBestOptimization();
+}
+
+
+//----------------------------------------------------------
+// Adaptive Memory File
+//----------------------------------------------------------
+#define ADAPTIVE_MEMORY_FILE "DHSP_AdaptiveMemory.bin"
+
+
+//----------------------------------------------------------
+// Save Adaptive Memory
+//----------------------------------------------------------
+bool SaveAdaptiveMemory()
+{
+   int handle=
+      FileOpen(
+      ADAPTIVE_MEMORY_FILE,
+      FILE_BIN|
+      FILE_WRITE);
+
+   if(handle==INVALID_HANDLE)
+      return false;
+
+   FileWriteInteger(
+      handle,
+      OptimizationCount);
+
+   int total=
+      MathMin(
+      OptimizationCount,
+      MAX_OPTIMIZATION_HISTORY);
+
+   for(int i=0;i<total;i++)
+   {
+      FileWriteStruct(
+         handle,
+         OptimizationDB[i]);
+   }
+
+   FileClose(handle);
+
+   return true;
+}
+
+
+//----------------------------------------------------------
+// Load Adaptive Memory
+//----------------------------------------------------------
+bool LoadAdaptiveMemory()
+{
+   int handle=
+      FileOpen(
+      ADAPTIVE_MEMORY_FILE,
+      FILE_BIN|
+      FILE_READ);
+
+   if(handle==INVALID_HANDLE)
+      return false;
+
+   OptimizationCount=
+      FileReadInteger(handle);
+
+   int total=
+      MathMin(
+      OptimizationCount,
+      MAX_OPTIMIZATION_HISTORY);
+
+   for(int i=0;i<total;i++)
+   {
+      FileReadStruct(
+         handle,
+         OptimizationDB[i]);
+   }
+
+   FileClose(handle);
+
+   return true;
+}
+
+
+//----------------------------------------------------------
+// Adaptive Auto Save
+//----------------------------------------------------------
+void AdaptiveAutoSave()
+{
+   static datetime lastSave=0;
+
+   if(TimeCurrent()-lastSave<300)
+      return;
+
+   lastSave=
+      TimeCurrent();
+
+   SaveAdaptiveMemory();
+}
+
+//----------------------------------------------------------
+// Recover Adaptive Learning
+//----------------------------------------------------------
+void RecoverAdaptiveLearning()
+{
+   if(!LoadAdaptiveMemory())
+   {
+      LogInfo(
+         "Adaptive",
+         "No Previous Memory Found");
+
+      return;
+   }
+
+   RestoreBestOptimization();
+
+   LogInfo(
+      "Adaptive",
+      "Learning Memory Restored");
+}
+
+//----------------------------------------------------------
+// Adaptive Knowledge
+//----------------------------------------------------------
+struct AdaptiveKnowledge
+{
+   ENUM_MARKET_PHASE bestMarketPhase;
+
+   ENUM_TRADING_SESSION bestSession;
+
+   string bestPattern;
+
+   double bestRiskMultiplier;
+
+   double bestConfidenceThreshold;
+
+   double highestProfitFactor;
+
+   double highestWinRate;
+
+   double lowestDrawdown;
+
+   int longestWinningStreak;
+
+   int longestLosingStreak;
+
+   string bestSymbol;
+
+   string brokerName;
+
+   datetime lastUpdated;
+};
+
+AdaptiveKnowledge Knowledge;
+
+
+//----------------------------------------------------------
+// Update Knowledge Base
+//----------------------------------------------------------
+void UpdateKnowledgeBase()
+{
+   if(AdaptiveStats.profitFactor >
+      Knowledge.highestProfitFactor)
+   {
+      Knowledge.highestProfitFactor =
+         AdaptiveStats.profitFactor;
+
+      Knowledge.bestRiskMultiplier =
+         AdaptiveParam.riskMultiplier;
+
+      Knowledge.bestConfidenceThreshold =
+         AdaptiveParam.confidenceThreshold;
+
+      Knowledge.bestMarketPhase =
+         CurrentMarketPhase;
+
+      Knowledge.bestSession =
+         CurrentSession;
+
+      Knowledge.lastUpdated =
+         TimeCurrent();
+   }
+
+   if(AdaptiveStats.winRate >
+      Knowledge.highestWinRate)
+   {
+      Knowledge.highestWinRate =
+         AdaptiveStats.winRate;
+   }
+
+   if(Knowledge.lowestDrawdown==0 ||
+      AdaptiveStats.drawdown <
+      Knowledge.lowestDrawdown)
+   {
+      Knowledge.lowestDrawdown =
+         AdaptiveStats.drawdown;
+   }
+}
+
+//----------------------------------------------------------
+// Update Streak Knowledge
+//----------------------------------------------------------
+void UpdateKnowledgeStreaks()
+{
+   if(Stats.currentWinningStreak >
+      Knowledge.longestWinningStreak)
+   {
+      Knowledge.longestWinningStreak =
+         Stats.currentWinningStreak;
+   }
+
+   if(Stats.currentLosingStreak >
+      Knowledge.longestLosingStreak)
+   {
+      Knowledge.longestLosingStreak =
+         Stats.currentLosingStreak;
+   }
+}
+
+
+//----------------------------------------------------------
+// Update Symbol Knowledge
+//----------------------------------------------------------
+void UpdateSymbolKnowledge()
+{
+   Knowledge.bestSymbol =
+      _Symbol;
+
+   Knowledge.brokerName =
+      BrokerInfo.BrokerName;
+}
+
+
+//----------------------------------------------------------
+// Update Adaptive Knowledge
+//----------------------------------------------------------
+void AdaptiveKnowledgeCycle()
+{
+   UpdateKnowledgeBase();
+
+   UpdateKnowledgeStreaks();
+
+   UpdateSymbolKnowledge();
+}
+
+//----------------------------------------------------------
+// Broker Intelligence
+//----------------------------------------------------------
+struct BrokerLearning
+{
+   string brokerName;
+
+   string serverName;
+
+   int trades;
+
+   double averageSpread;
+
+   double maximumSpread;
+
+   double averageSlippage;
+
+   double maximumSlippage;
+
+   double executionSpeed;
+
+   double fillRate;
+
+   double confidence;
+};
+
+BrokerLearning BrokerMemory;
+
+
+//----------------------------------------------------------
+// Initialize Broker Learning
+//----------------------------------------------------------
+void InitializeBrokerLearning()
+{
+   BrokerMemory.brokerName =
+      BrokerInfo.BrokerName;
+
+   BrokerMemory.serverName =
+      BrokerInfo.ServerName;
+
+   BrokerMemory.trades = 0;
+
+   BrokerMemory.averageSpread = 0;
+
+   BrokerMemory.maximumSpread = 0;
+
+   BrokerMemory.averageSlippage = 0;
+
+   BrokerMemory.maximumSlippage = 0;
+
+   BrokerMemory.executionSpeed = 0;
+
+   BrokerMemory.fillRate = 100;
+
+   BrokerMemory.confidence = 50;
+}
+
+//----------------------------------------------------------
+// Update Broker Learning
+//----------------------------------------------------------
+void UpdateBrokerLearning(
+   double spread,
+   double slippage,
+   double executionTime)
+{
+   BrokerMemory.trades++;
+
+   BrokerMemory.averageSpread =
+      ((BrokerMemory.averageSpread*
+      (BrokerMemory.trades-1))+spread)/
+      BrokerMemory.trades;
+
+   BrokerMemory.averageSlippage =
+      ((BrokerMemory.averageSlippage*
+      (BrokerMemory.trades-1))+slippage)/
+      BrokerMemory.trades;
+
+   BrokerMemory.executionSpeed =
+      ((BrokerMemory.executionSpeed*
+      (BrokerMemory.trades-1))+executionTime)/
+      BrokerMemory.trades;
+
+   if(spread>
+      BrokerMemory.maximumSpread)
+      BrokerMemory.maximumSpread=spread;
+
+   if(slippage>
+      BrokerMemory.maximumSlippage)
+      BrokerMemory.maximumSlippage=slippage;
+}
+
+//----------------------------------------------------------
+// Calculate Broker Confidence
+//----------------------------------------------------------
+void CalculateBrokerConfidence()
+{
+   double score=100;
+
+   score-=
+      BrokerMemory.averageSpread;
+
+   score-=
+      BrokerMemory.averageSlippage*2;
+
+   score-=
+      BrokerMemory.executionSpeed*0.10;
+
+   BrokerMemory.confidence=
+      MathMax(
+      0,
+      MathMin(
+      100,
+      score));
+}
+
+
+//----------------------------------------------------------
+// Broker Trading Quality
+//----------------------------------------------------------
+bool BrokerTradingQualityGood()
+{
+   return
+   (
+      BrokerMemory.confidence>=60
+   );
+}
+
+
+//----------------------------------------------------------
+// Symbol Intelligence
+//----------------------------------------------------------
+struct SymbolLearning
+{
+   string symbol;
+
+   int trades;
+
+   double averageSpread;
+
+   double averageSlippage;
+
+   double averageExecutionTime;
+
+   double winRate;
+
+   double profitFactor;
+
+   double confidence;
+};
+
+SymbolLearning SymbolMemory[];
+
+
+//----------------------------------------------------------
+// Find Symbol
+//----------------------------------------------------------
+int FindSymbolLearning(string symbol)
+{
+   for(int i=0;i<ArraySize(SymbolMemory);i++)
+   {
+      if(SymbolMemory[i].symbol==symbol)
+         return i;
+   }
+
+   return -1;
+}
+
+//----------------------------------------------------------
+// Register Symbol
+//----------------------------------------------------------
+int RegisterSymbolLearning(string symbol)
+{
+   int index=
+      FindSymbolLearning(symbol);
+
+   if(index>=0)
+      return index;
+
+   int total=
+      ArraySize(SymbolMemory);
+
+   ArrayResize(SymbolMemory,total+1);
+
+   SymbolMemory[total].symbol=symbol;
+
+   SymbolMemory[total].trades=0;
+
+   SymbolMemory[total].confidence=50.0;
+
+   return total;
+}
+
+//----------------------------------------------------------
+// Update Symbol Learning
+//----------------------------------------------------------
+void UpdateSymbolLearning(
+   string symbol,
+   double spread,
+   double slippage,
+   double executionTime,
+   bool win,
+   double profitFactor)
+{
+   int index=
+      RegisterSymbolLearning(symbol);
+
+   SymbolMemory[index].trades++;
+
+   int n=
+      SymbolMemory[index].trades;
+
+   SymbolMemory[index].averageSpread=
+      ((SymbolMemory[index].averageSpread*
+      (n-1))+spread)/n;
+
+   SymbolMemory[index].averageSlippage=
+      ((SymbolMemory[index].averageSlippage*
+      (n-1))+slippage)/n;
+
+   SymbolMemory[index].averageExecutionTime=
+      ((SymbolMemory[index].averageExecutionTime*
+      (n-1))+executionTime)/n;
+
+   SymbolMemory[index].profitFactor=
+      profitFactor;
+}
+
+//----------------------------------------------------------
+// Calculate Symbol Confidence
+//----------------------------------------------------------
+void UpdateSymbolConfidence()
+{
+   for(int i=0;i<ArraySize(SymbolMemory);i++)
+   {
+      double score=100.0;
+
+      score-=
+         SymbolMemory[i].averageSpread;
+
+      score-=
+         SymbolMemory[i].averageSlippage*2.0;
+
+      score-=
+         SymbolMemory[i].averageExecutionTime*0.10;
+
+      score+=
+         SymbolMemory[i].profitFactor*5.0;
+
+      SymbolMemory[i].confidence=
+         MathMax(
+         0.0,
+         MathMin(
+         100.0,
+         score));
+   }
+}
+
+//----------------------------------------------------------
+// Master Adaptive Score
+//----------------------------------------------------------
+struct MasterAdaptiveScore
+{
+   double liquidity;
+
+   double structure;
+
+   double premiumDiscount;
+
+   double breadButter;
+
+   double session;
+
+   double pattern;
+
+   double broker;
+
+   double symbol;
+
+   double optimization;
+
+   double overall;
+
+   bool tradeAllowed;
+};
+
+MasterAdaptiveScore AdaptiveScore;
+
+
+//----------------------------------------------------------
+// Reset Master Score
+//----------------------------------------------------------
+void ResetAdaptiveScore()
+{
+   ZeroMemory(AdaptiveScore);
+
+   AdaptiveScore.tradeAllowed=false;
+}
+
+
+//----------------------------------------------------------
+// Build Master Adaptive Score
+//----------------------------------------------------------
+void BuildMasterAdaptiveScore()
+{
+   ResetAdaptiveScore();
+
+   AdaptiveScore.liquidity =
+      LiquidityConfidence();
+
+   AdaptiveScore.structure =
+      StructureConfidence();
+
+   AdaptiveScore.premiumDiscount =
+      PDProfile.confidence;
+
+   AdaptiveScore.session =
+      SessionConfidence();
+
+   int bb=
+      BestBreadButterSetup();
+
+   if(bb>=0)
+      AdaptiveScore.breadButter=
+         BreadButterTF[bb].confidence;
+
+   AdaptiveScore.pattern =
+      Adaptive.confidence;
+
+   AdaptiveScore.broker =
+      BrokerMemory.confidence;
+
+   int sym=
+      FindSymbolLearning(_Symbol);
+
+   if(sym>=0)
+      AdaptiveScore.symbol=
+         SymbolMemory[sym].confidence;
+
+   AdaptiveScore.optimization =
+      Optimizer.currentConfidence;
+}
+
+
+//----------------------------------------------------------
+// Calculate Overall Score
+//----------------------------------------------------------
+void CalculateMasterAdaptiveScore()
+{
+   AdaptiveScore.overall =
+      AdaptiveScore.liquidity * 0.15 +
+
+      AdaptiveScore.structure * 0.15 +
+
+      AdaptiveScore.premiumDiscount * 0.10 +
+
+      AdaptiveScore.breadButter * 0.20 +
+
+      AdaptiveScore.session * 0.10 +
+
+      AdaptiveScore.pattern * 0.10 +
+
+      AdaptiveScore.broker * 0.05 +
+
+      AdaptiveScore.symbol * 0.05 +
+
+      AdaptiveScore.optimization * 0.10;
+}
+
+//----------------------------------------------------------
+// Adaptive Trade Permission
+//----------------------------------------------------------
+void UpdateAdaptiveDecision()
+{
+   CalculateMasterAdaptiveScore();
+
+   AdaptiveScore.tradeAllowed=
+      AdaptiveScore.overall>=
+      AdaptiveParam.confidenceThreshold;
+}
+
+//----------------------------------------------------------
+// Adaptive Decision Quality
+//----------------------------------------------------------
+string AdaptiveDecisionQuality()
+{
+   if(AdaptiveScore.overall>=90)
+      return "EXCELLENT";
+
+   if(AdaptiveScore.overall>=80)
+      return "VERY GOOD";
+
+   if(AdaptiveScore.overall>=70)
+      return "GOOD";
+
+   if(AdaptiveScore.overall>=60)
+      return "AVERAGE";
+
+   return "POOR";
+}
+
+//----------------------------------------------------------
+// Main Adaptive Learning Cycle
+//----------------------------------------------------------
+void AdaptiveLearningCycle()
+{
+   UpdateAdaptiveStatistics();
+
+   BuildAdaptiveDecision();
+
+   UpdatePatternConfidence();
+
+   UpdatePatternPriority();
+
+   UpdateContextConfidence();
+
+   BuildMasterAdaptiveScore();
+
+   UpdateAdaptiveDecision();
+
+   AdaptiveKnowledgeCycle();
+
+   UpdateAdaptiveMemory();
+
+   AdaptiveAutoSave();
+}
+
+
+//----------------------------------------------------------
+// Adaptive Trade Filter
+//----------------------------------------------------------
+bool AdaptiveTradeFilter()
+{
+   if(!AdaptiveScore.tradeAllowed)
+      return false;
+
+   if(BrokerMemory.confidence < 50)
+      return false;
+
+   int symbol=FindSymbolLearning(_Symbol);
+
+   if(symbol>=0)
+   {
+      if(SymbolMemory[symbol].confidence<50)
+         return false;
+   }
+
+   return true;
+}
+
+//----------------------------------------------------------
+// Adaptive Risk Recommendation
+//----------------------------------------------------------
+double AdaptiveRisk()
+{
+   double risk=
+      BaseRiskPercent;
+
+   risk*=
+      AdaptiveParam.riskMultiplier;
+
+   risk=
+      MathMax(0.25,risk);
+
+   risk=
+      MathMin(risk,ContestRiskPercent);
+
+   return risk;
+}
+
+//----------------------------------------------------------
+// Adaptive Confidence Bonus
+//----------------------------------------------------------
+double AdaptiveConfidenceBonus()
+{
+   if(AdaptiveScore.overall>=90)
+      return 5.0;
+
+   if(AdaptiveScore.overall>=80)
+      return 3.0;
+
+   if(AdaptiveScore.overall>=70)
+      return 1.0;
+
+   return 0.0;
+}
+
+
+//----------------------------------------------------------
+// Freeze Learning
+//----------------------------------------------------------
+void CheckLearningSafety()
+{
+   if(Stats.dailyLossPercent>=
+      DailyMaxLossPercent)
+   {
+      Optimizer.learning=false;
+
+      Optimizer.optimizing=false;
+
+      LogWarning(
+         "Adaptive",
+         "Learning Frozen");
+   }
+}
+
+//----------------------------------------------------------
+// Resume Learning
+//----------------------------------------------------------
+void ResumeLearning()
+{
+   if(Stats.dailyLossPercent<
+      DailyMaxLossPercent*0.50)
+   {
+      Optimizer.learning=true;
+   }
+}
+
+//----------------------------------------------------------
+// Adaptive Health
+//----------------------------------------------------------
+bool AdaptiveHealthy()
+{
+   if(!Optimizer.enabled)
+      return false;
+
+   if(AdaptiveScore.overall<=0)
+      return false;
+
+   if(OptimizationCount<0)
+      return false;
+
+   return true;
+}
+
+//----------------------------------------------------------
+// Adaptive Manager
+//----------------------------------------------------------
+void AdaptiveManager()
+{
+   if(!Optimizer.learning)
+      return;
+
+   AdaptiveLearningCycle();
+
+   ExecuteAdaptiveOptimization();
+
+   CheckLearningSafety();
+
+   ResumeLearning();
+}
+
+
 
 
 
