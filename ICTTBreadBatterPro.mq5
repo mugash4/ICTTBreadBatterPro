@@ -13166,6 +13166,8 @@ void AdaptiveManager()
    CheckLearningSafety();
 
    ResumeLearning();
+   
+   Performance.adaptiveCycles++;
 }
 
 
@@ -13222,6 +13224,19 @@ int OnInit()
    BuildDashboard();
 
    return(INIT_SUCCEEDED);
+
+  if(!ProductionReady())
+   {
+     Print("Production validation failed.");
+
+     return(INIT_FAILED);
+   }
+
+  Print("=================================");
+  Print(" DowHommaScalperPro");
+  Print(" Version 1.0 Production");
+  Print(" Status : READY");
+  Print("=================================");
 }
 
 
@@ -13295,6 +13310,8 @@ void TradeDecisionCycle()
       return;
 
    EvaluateTradeSignals();
+
+   Performance.tradeDecisions++;
 }
 
 //----------------------------------------------------------
@@ -13323,6 +13340,8 @@ void OnTick()
       return;
    if(EmergencyStop())
       return;
+   
+   UpdatePerformance();
 
    MainTradingCycle();
 
@@ -13486,6 +13505,8 @@ void OnChartEvent(
 //----------------------------------------------------------
 void ShutdownAllSystems()
 {
+   PrintPerformanceReport();
+   
    SaveAdaptiveMemory();
 
    SaveDashboardPosition();
