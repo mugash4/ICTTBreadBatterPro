@@ -9059,6 +9059,15 @@ bool InitializeDashboard()
    Dashboard.height = 420;
 
    SystemState.dashboardReady = true;
+   
+   InitializeDashboardTheme();
+
+   LoadDashboardPosition();
+
+   BuildDashboard();
+
+   CreateDashboardControls();
+
 
    return true;
 }
@@ -10251,6 +10260,542 @@ void DashboardTimer()
 
    lastUpdate=TimeCurrent();
 }
+
+//----------------------------------------------------------
+// Notification Types
+//----------------------------------------------------------
+enum ENUM_NOTIFICATION_TYPE
+{
+   NOTIFY_INFO = 0,
+   NOTIFY_SUCCESS,
+   NOTIFY_WARNING,
+   NOTIFY_ERROR
+};
+
+//----------------------------------------------------------
+// Notification
+//----------------------------------------------------------
+struct DashboardNotification
+{
+   datetime time;
+
+   ENUM_NOTIFICATION_TYPE type;
+
+   string message;
+};
+
+DashboardNotification Notifications[];
+
+//----------------------------------------------------------
+// Add Notification
+//----------------------------------------------------------
+void AddNotification(
+   ENUM_NOTIFICATION_TYPE type,
+   string message)
+{
+   int index=ArraySize(Notifications);
+
+   ArrayResize(Notifications,index+1);
+
+   Notifications[index].time=TimeCurrent();
+
+   Notifications[index].type=type;
+
+   Notifications[index].message=message;
+
+   if(ArraySize(Notifications)>100)
+      ArrayRemove(Notifications,0);
+
+   Dashboard.needsRefresh=true;
+}
+
+//----------------------------------------------------------
+// Latest Notification
+//----------------------------------------------------------
+string GetLatestNotification()
+{
+   int total=ArraySize(Notifications);
+
+   if(total==0)
+      return "System Ready";
+
+   return Notifications[total-1].message;
+}
+
+//----------------------------------------------------------
+// Process Notifications
+//----------------------------------------------------------
+void ProcessNotifications()
+{
+   static string lastMessage="";
+
+   string current=GetLatestNotification();
+
+   if(current==lastMessage)
+      return;
+
+   lastMessage=current;
+
+   Print("[DHSP] ",current);
+}
+
+//----------------------------------------------------------
+// System Health
+//----------------------------------------------------------
+struct SystemHealth
+{
+   bool marketConnection;
+
+   bool tradeAllowed;
+
+   bool dashboardReady;
+
+   bool learningReady;
+
+   bool databaseHealthy;
+
+   bool newsFilterReady;
+
+   bool indicatorsReady;
+
+   bool brokerReady;
+
+   datetime lastHealthCheck;
+};
+
+SystemHealth Health;
+
+//----------------------------------------------------------
+// Process Health Monitor
+//----------------------------------------------------------
+void ProcessHealthMonitor()
+{
+   Health.marketConnection =
+      TerminalInfoInteger(TERMINAL_CONNECTED);
+
+   Health.tradeAllowed =
+      AccountInfoInteger(ACCOUNT_TRADE_ALLOWED);
+
+   Health.dashboardReady =
+      Dashboard.initialized;
+
+   Health.learningReady =
+      SystemState.learningEnabled;
+
+   Health.databaseHealthy =
+      VerifyLearningDatabase();
+
+   Health.newsFilterReady =
+      EnableNewsFilter;
+
+   Health.brokerReady =
+      (BrokerInfo.name!="");
+
+   Health.lastHealthCheck =
+      TimeCurrent();
+
+   SystemState.systemHealthy =
+      IsSystemHealthy();
+}
+
+
+//----------------------------------------------------------
+// System Healthy
+//----------------------------------------------------------
+bool IsSystemHealthy()
+{
+   if(!Health.marketConnection)
+      return false;
+
+   if(!Health.tradeAllowed)
+      return false;
+
+   if(!Health.dashboardReady)
+      return false;
+
+   if(!Health.learningReady)
+      return false;
+
+   if(!Health.databaseHealthy)
+      return false;
+
+   if(!Health.brokerReady)
+      return false;
+
+   return true;
+}
+
+
+//----------------------------------------------------------
+// Health Alerts
+//----------------------------------------------------------
+void ProcessHealthAlerts()
+{
+   static bool previousHealth=true;
+
+   if(previousHealth==SystemState.systemHealthy)
+      return;
+
+   previousHealth=SystemState.systemHealthy;
+
+   if(SystemState.systemHealthy)
+   {
+      AddNotification(
+         NOTIFY_SUCCESS,
+         "System Health Restored");
+   }
+   else
+   {
+      AddNotification(
+         NOTIFY_ERROR,
+         "System Health Failure");
+   }
+}
+
+
+//----------------------------------------------------------
+// Dashboard Health Text
+//----------------------------------------------------------
+string GetHealthStatus()
+{
+   if(SystemState.systemHealthy)
+      return "GOOD";
+
+   return "ERROR";
+}
+
+
+//----------------------------------------------------------
+// Log Levels
+//----------------------------------------------------------
+enum ENUM_LOG_LEVEL
+{
+   LOG_INFO = 0,
+   LOG_WARNING,
+   LOG_ERROR,
+   LOG_CRITICAL
+};
+
+//----------------------------------------------------------
+// System Log
+//----------------------------------------------------------
+struct SystemLog
+{
+   datetime time;
+
+   ENUM_LOG_LEVEL level;
+
+   string module;
+
+   string message;
+};
+
+SystemLog LogHistory[];
+
+//----------------------------------------------------------
+// Add Log Entry
+//----------------------------------------------------------
+void AddLogEntry(
+   ENUM_LOG_LEVEL level,
+   string module,
+   string message)
+{
+   int index = ArraySize(LogHistory);
+
+   ArrayResize(LogHistory,index+1);
+
+   LogHistory[index].time = TimeCurrent();
+
+   LogHistory[index].level = level;
+
+   LogHistory[index].module = module;
+
+   LogHistory[index].message = message;
+
+   if(ArraySize(LogHistory)>500)
+      ArrayRemove(LogHistory,0);
+}
+
+//----------------------------------------------------------
+// Process Logger
+//----------------------------------------------------------
+void ProcessLogger()
+{
+   static int processed=0;
+
+   while(processed<ArraySize(LogHistory))
+   {
+      Print("[",
+            LogHistory[processed].module,
+            "] ",
+            LogHistory[processed].message);
+
+      processed++;
+   }
+}
+
+
+//----------------------------------------------------------
+// Log Information
+//----------------------------------------------------------
+void LogInfo(string module,string message)
+{
+   AddLogEntry(LOG_INFO,module,message);
+}
+
+//----------------------------------------------------------
+// Log Warning
+//----------------------------------------------------------
+void LogWarning(string module,string message)
+{
+   AddLogEntry(LOG_WARNING,module,message);
+}
+
+//----------------------------------------------------------
+// Log Error
+//----------------------------------------------------------
+void LogError(string module,string message)
+{
+   AddLogEntry(LOG_ERROR,module,message);
+}
+
+//----------------------------------------------------------
+// Log Critical
+//----------------------------------------------------------
+void LogCritical(string module,string message)
+{
+   AddLogEntry(LOG_CRITICAL,module,message);
+} 
+
+
+//----------------------------------------------------------
+// Create Dashboard Label
+//----------------------------------------------------------
+void CreateDashboardLabel(
+   string name,
+   int x,
+   int y,
+   string text,
+   color clr,
+   int size)
+{
+   string obj=DashboardObjectName(name);
+
+   if(ObjectFind(0,obj)<0)
+      ObjectCreate(0,obj,OBJ_LABEL,0,0,0);
+
+   ObjectSetInteger(0,obj,OBJPROP_XDISTANCE,x);
+   ObjectSetInteger(0,obj,OBJPROP_YDISTANCE,y);
+
+   ObjectSetInteger(0,obj,OBJPROP_COLOR,clr);
+
+   ObjectSetInteger(0,obj,OBJPROP_FONTSIZE,size);
+
+   ObjectSetString(0,obj,OBJPROP_FONT,"Segoe UI");
+
+   ObjectSetString(0,obj,OBJPROP_TEXT,text);
+
+   ObjectSetInteger(0,obj,OBJPROP_SELECTABLE,false);
+
+   ObjectSetInteger(0,obj,OBJPROP_HIDDEN,true);
+}
+
+//----------------------------------------------------------
+// Set Dashboard Value
+//----------------------------------------------------------
+void SetDashboardValue(
+   string id,
+   string caption,
+   string value)
+{
+   string text=
+      caption+
+      ": "+
+      value;
+
+   UpdateDashboardLabel(id,text);
+}
+
+//----------------------------------------------------------
+// Update Dashboard Label
+//----------------------------------------------------------
+void UpdateDashboardLabel(
+   string name,
+   string value)
+{
+   string obj=DashboardObjectName(name);
+
+   if(ObjectFind(0,obj)>=0)
+      ObjectSetString(
+         0,
+         obj,
+         OBJPROP_TEXT,
+         value);
+}
+
+
+//----------------------------------------------------------
+// Create Panel Title
+//----------------------------------------------------------
+void CreatePanelTitle(
+   string id,
+   string title)
+{
+   CreateDashboardLabel(
+      id,
+      0,
+      0,
+      title,
+      DashboardStyle.title,
+      10);
+}
+
+//----------------------------------------------------------
+// Create Dashboard Button
+//----------------------------------------------------------
+void CreateDashboardButton(
+   string id,
+   string caption)
+{
+   string obj=
+      DashboardObjectName(id);
+
+   if(ObjectFind(0,obj)<0)
+      ObjectCreate(
+         0,
+         obj,
+         OBJ_BUTTON,
+         0,
+         0,
+         0);
+
+   ObjectSetString(
+      0,
+      obj,
+      OBJPROP_TEXT,
+      caption);
+
+   ObjectSetInteger(
+      0,
+      obj,
+      OBJPROP_FONTSIZE,
+      10);
+
+   ObjectSetInteger(
+      0,
+      obj,
+      OBJPROP_SELECTABLE,
+      false);
+
+   ObjectSetInteger(
+      0,
+      obj,
+      OBJPROP_HIDDEN,
+      true);
+}
+
+//----------------------------------------------------------
+// Delete Restore Button
+//----------------------------------------------------------
+void DeleteRestoreButton()
+{
+   ObjectDelete(
+      0,
+      DashboardObjectName(
+      "BTN_RESTORE"));
+}
+
+//----------------------------------------------------------
+// Dashboard Event Manager
+//----------------------------------------------------------
+void ProcessDashboardEvents(
+   const int id,
+   const long &lparam,
+   const double &dparam,
+   const string &sparam)
+{
+   //--------------------------------------------------
+   // Button Clicks
+   //--------------------------------------------------
+   if(id==CHARTEVENT_OBJECT_CLICK)
+   {
+      ProcessDashboardButton(sparam);
+      return;
+   }
+
+   //--------------------------------------------------
+   // Mouse Move
+   //--------------------------------------------------
+   if(id==CHARTEVENT_MOUSE_MOVE)
+   {
+      if(DashboardPos.dragging)
+      {
+         DragDashboard(
+            (int)lparam,
+            (int)dparam);
+      }
+
+      return;
+   }
+
+   //--------------------------------------------------
+   // Mouse Down
+   //--------------------------------------------------
+   if(id==CHARTEVENT_CLICK)
+   {
+      BeginDashboardDrag(
+         (int)lparam,
+         (int)dparam);
+
+      return;
+   }
+}
+
+
+//----------------------------------------------------------
+// Dashboard Mouse Release
+//----------------------------------------------------------
+void ProcessDashboardMouseRelease()
+{
+   if(DashboardPos.dragging)
+      EndDashboardDrag();
+}
+
+//----------------------------------------------------------
+// Detect Chart Changes
+//----------------------------------------------------------
+void ProcessDashboardResize()
+{
+   static int oldWidth=0;
+   static int oldHeight=0;
+
+   DetectDashboardResolution();
+
+   if(oldWidth!=Dashboard.chartWidth ||
+      oldHeight!=Dashboard.chartHeight)
+   {
+      oldWidth=Dashboard.chartWidth;
+      oldHeight=Dashboard.chartHeight;
+
+      ClampDashboard();
+
+      BuildDashboard();
+   }
+}
+
+//----------------------------------------------------------
+// Dashboard Service
+//----------------------------------------------------------
+void DashboardService()
+{
+   ProcessDashboardResize();
+
+   DashboardTimer();
+}
+
+
+
+
 
 
 
